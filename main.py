@@ -69,8 +69,7 @@ async def translate_command(ctx, *, target_language: str):
             await ctx.reply("The replied-to message is empty.")
             return
 
-        async with ctx.typing():
-            translated_text = translate_to_language(text_to_translate, target_language)
+        translated_text = translate_to_language(text_to_translate, target_language)
 
         if translated_text:
             await ctx.reply(f"Translated to {target_language}:\n> {translated_text.get("text")}")
