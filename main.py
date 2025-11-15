@@ -41,15 +41,13 @@ async def on_message(message):
 
         try:
             # Show that the bot is working
-            async with message.channel.typing():
-                # Get the translation and language info
-                translation_data = translate_to_english(message.content)
+            translation_data = translate_to_english(message.content)
 
-                # Proceed only if we got data and the language is not English
-                if translation_data and translation_data.get("language") != "English":
-                    translated_text = translation_data.get("text")
-                    # Reply to the original message with the translation
-                    await message.reply(f"> {translated_text}")
+            # Proceed only if we got data and the language is not English
+            if translation_data and translation_data.get("language") != "English":
+                translated_text = translation_data.get("text")
+                # Reply to the original message with the translation
+                await message.reply(f"> {translated_text}")
         except Exception as e:
             print(f"An error occurred during translation or sending: {e}")
             await message.channel.send("Sorry, I couldn't translate that.")
@@ -69,7 +67,8 @@ async def translate_command(ctx, *, target_language: str):
             await ctx.reply("The replied-to message is empty.")
             return
 
-        translated_text = translate_to_language(text_to_translate, target_language)
+        async with ctx.typing():
+            translated_text = translate_to_language(text_to_translate, target_language)
 
         if translated_text:
             await ctx.reply(f"Translated to {target_language}:\n> {translated_text.get("text")}")
