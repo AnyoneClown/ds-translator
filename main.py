@@ -80,7 +80,6 @@ async def translate_command(ctx, *, target_language: str):
 
 
 @bot.command(name="en")
-@commands.has_role("Translator")  # Restrict this command to users with the 'Translator' role
 async def en_command(ctx):
     """Translates a replied-to message into English."""
     if not ctx.message.reference:
@@ -95,8 +94,7 @@ async def en_command(ctx):
             await ctx.reply("The replied-to message is empty.")
             return
 
-        async with ctx.typing():
-            translation_data = translate_to_english(text_to_translate)
+        translation_data = translate_to_english(text_to_translate)
 
         if translation_data and translation_data.get("language") != "English":
             translated_text = translation_data.get("text")
