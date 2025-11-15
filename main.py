@@ -52,7 +52,7 @@ async def on_message(message):
             print(f"An error occurred during translation or sending: {e}")
             await message.channel.send("Sorry, I couldn't translate that.")
 
-@bot.command(name="translate")
+@bot.command(name="t", aliases=["translate"])
 async def translate_command(ctx, *, target_language: str):
     """Translates a replied-to message into a specified language."""
     if not ctx.message.reference:
