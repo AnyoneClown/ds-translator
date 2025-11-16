@@ -1,0 +1,50 @@
+name: Validate Configuration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Validate Docker Compose
+        run: docker compose config
+      
+      - name: Check Dockerfile syntax
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          ignore: DL3008,DL3009
+      
+      - name: Validate .env.example
+        run: |
+          if [ ! -f .env.example ]; then
+            echo "Error: .env.example not found"
+            exit 1
+          fi
+          
+          # Check required variables
+          for var in DISCORD_TOKEN GOOGLE_GENAI_API_KEY; do
+            if ! grep -q "$var=" .env.example; then
+              echo "Error: Missing $var in .env.example"
+              exit 1
+            fi
+          done
+          
+          echo "✓ .env.example validation passed"
+      
+      - name: Check for sensitive data
+        run: |
+          # Ensure no real tokens are committed
+          if grep -r "sk-" . --include="*.py" --include="*.md" --include="*.yml" --include="*.yaml" --exclude-dir=.git; then
+            echo "Error: Potential API key found"
+            exit 1
+          fi
+          echo "✓ No sensitive data detected"
