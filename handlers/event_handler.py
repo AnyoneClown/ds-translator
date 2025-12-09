@@ -13,7 +13,7 @@ class EventHandler:
     def __init__(self, scheduler_service: IEventSchedulerService, bot: commands.Bot):
         """
         Initialize event handler.
-        
+
             scheduler_service: Service for managing scheduled events
             bot: Discord bot instance
         """
@@ -22,7 +22,7 @@ class EventHandler:
 
     def register_commands(self):
         """Register all event scheduling commands with the bot."""
-        
+
         @self._bot.command(name="schedule")
         async def schedule_event(ctx, date: str, time: str, *, message: str):
             """Schedule an @everyone ping 10 minutes before the specified time. Format: !schedule YYYY-MM-DD HH:MM Your message"""
@@ -40,12 +40,12 @@ class EventHandler:
 
     def start_scheduler_task(self):
         """Start the background task that checks for due events."""
-        
+
         @tasks.loop(minutes=1)
         async def check_scheduled_events():
             """Check for scheduled events and ping roles when it's time."""
             due_events = self._scheduler_service.check_and_get_due_events()
-            
+
             for channel_id, events in due_events.items():
                 channel = self._bot.get_channel(channel_id)
                 if not channel:
@@ -60,25 +60,26 @@ class EventHandler:
         """Handle scheduling a new event."""
         try:
             from datetime import timedelta
-            
+
             datetime_str = f"{date} {time}"
-            event_time = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+            event_time = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M").replace(
+                tzinfo=timezone.utc
+            )
 
             if event_time <= datetime.now(timezone.utc):
                 await ctx.reply("You cannot schedule an event in the past!")
                 return
 
             notification_time = event_time - timedelta(minutes=10)
-            
+
             if notification_time <= datetime.now(timezone.utc):
-                await ctx.reply("The event is too soon! Must be more than 10 minutes in the future.")
+                await ctx.reply(
+                    "The event is too soon! Must be more than 10 minutes in the future."
+                )
                 return
 
             success = self._scheduler_service.schedule_event(
-                ctx.channel.id,
-                notification_time,
-                ["everyone"],
-                message
+                ctx.channel.id, notification_time, ["everyone"], message
             )
 
             if success:
@@ -86,12 +87,14 @@ class EventHandler:
                     f"Scheduled @everyone ping for **{notification_time.strftime('%Y-%m-%d %H:%M')} UTC**\n"
                     f"(10 minutes before {event_time.strftime('%H:%M')})\n"
                     f"Message: {message}",
-                    allowed_mentions=discord.AllowedMentions.none()
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
             else:
                 await ctx.reply("Failed to schedule event.")
         except ValueError:
-            await ctx.reply("Invalid date/time format. Use: `!schedule YYYY-MM-DD HH:MM Your message`")
+            await ctx.reply(
+                "Invalid date/time format. Use: `!schedule YYYY-MM-DD HH:MM Your message`"
+            )
         except Exception as e:
             print(f"Error scheduling event: {e}")
             await ctx.reply("An error occurred while scheduling the event.")
@@ -111,17 +114,22 @@ class EventHandler:
                 f"   {message}"
             )
 
-        await ctx.reply("**Scheduled Events:**\n\n" + "\n\n".join(events_list), allowed_mentions=discord.AllowedMentions.none())
+        await ctx.reply(
+            "**Scheduled Events:**\n\n" + "\n\n".join(events_list),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def _handle_cancel_event(self, ctx, event_number: int):
         """Handle cancelling a scheduled event."""
         try:
             index = event_number - 1
-            
+
             if self._scheduler_service.cancel_event(ctx.channel.id, index):
                 await ctx.reply(f"Cancelled event #{event_number}")
             else:
-                await ctx.reply(f"Event #{event_number} not found. Use `!events` to see available events.")
+                await ctx.reply(
+                    f"Event #{event_number} not found. Use `!events` to see available events."
+                )
         except Exception as e:
             print(f"Error cancelling event: {e}")
             await ctx.reply("An error occurred while cancelling the event.")
@@ -155,10 +163,7 @@ class EventHandler:
         return " ".join(message_parts) if message_parts else "Event reminder!"
 
     async def _send_event_notification(
-        self,
-        channel: discord.TextChannel,
-        role_names: List[str],
-        message: str
+        self, channel: discord.TextChannel, role_names: List[str], message: str
     ):
         """Send event notification with @everyone ping."""
         notification = f"@everyone\n{message}"

@@ -18,34 +18,36 @@ class TranslatorBot:
     def __init__(self, config: BotConfig):
         """
         Initialize the bot with configuration and services.
-        
+
         Args:
             config: Bot configuration object
         """
         self.config = config
-        
+
         # Setup Discord bot
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
         self.bot = commands.Bot(command_prefix=config.command_prefix, intents=intents)
-        
+
         # Initialize services
         gemini_client = genai.Client()
         self.translation_service = TranslationService(gemini_client)
         self.event_scheduler_service = EventSchedulerService()
-        
+
         # Initialize handlers
-        self.translation_handler = TranslationHandler(self.translation_service, self.bot)
+        self.translation_handler = TranslationHandler(
+            self.translation_service, self.bot
+        )
         self.event_handler = EventHandler(self.event_scheduler_service, self.bot)
-        
+
         # Setup bot
         self._setup_events()
         self._setup_handlers()
 
     def _setup_events(self):
         """Register bot events."""
-        
+
         @self.bot.event
         async def on_ready():
             print(f"Bot logged in as {self.bot.user}")
