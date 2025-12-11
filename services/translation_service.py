@@ -72,7 +72,7 @@ Respond ONLY with a JSON object in this exact format:
 
         try:
             response = self._client.models.generate_content(
-                model="gemma-3-12b-it",
+                model="gemma-3-1b-it",
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=0,
@@ -112,7 +112,7 @@ Respond ONLY with a JSON object in this exact format:
 
         try:
             response = self._client.models.generate_content(
-                model="gemma-3-12b-it",
+                model="gemma-3-1b-it",
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=0,
