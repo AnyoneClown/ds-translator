@@ -51,11 +51,19 @@ class PlayerInfoHandler:
 
             # Format the response
             formatted_stats = self._player_info_service.format_player_stats(player_data)
+            
+            # Get player name for title
+            player_name = player_data.get("name", f"Player {player_id}")
 
             # Create an embed for better presentation
             embed = discord.Embed(
-                title=f"📊 Stats for Player {player_id}", description=formatted_stats, color=discord.Color.blue()
+                title=f"📊 {player_name}", description=formatted_stats, color=discord.Color.blue()
             )
+            
+            # Add profile photo if available
+            if "profilePhoto" in player_data and player_data["profilePhoto"]:
+                embed.set_thumbnail(url=player_data["profilePhoto"])
+            
             embed.set_footer(text="Data from kingshot.net API")
 
             await loading_msg.edit(content=None, embed=embed)

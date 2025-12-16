@@ -42,7 +42,8 @@ class PlayerInfoService(IPlayerInfoService):
                     self._endpoint, params={"playerId": player_id}, timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status == 200:
-                        return await response.json()
+                        response = await response.json()
+                        return response.get("data")
                     elif response.status == 404:
                         return None
                     else:
@@ -68,13 +69,28 @@ class PlayerInfoService(IPlayerInfoService):
         if not player_data:
             return "No data available"
 
-        # Extract common fields (adjust based on actual API response)
+        # Format with emojis
         lines = []
-        lines.append("**Player Statistics**")
-
-        for key, value in player_data.items():
-            # Format key nicely (convert snake_case to Title Case)
-            formatted_key = key.replace("_", " ").title()
-            lines.append(f"**{formatted_key}:** {value}")
+        
+        # Name
+        if "name" in player_data:
+            lines.append(f"👤 **Name:** {player_data['name']}")
+        
+        # Player ID
+        if "playerId" in player_data:
+            lines.append(f"🆔 **ID:** {player_data['playerId']}")
+        
+        # Castle Level
+        if "levelRendered" in player_data:
+            level_info = player_data['levelRendered']
+            if "levelRenderedDetailed" in player_data:
+                level_info = player_data['levelRenderedDetailed']
+            lines.append(f"🏰 **Castle Level:** {level_info}")
+        elif "level" in player_data:
+            lines.append(f"🏰 **Castle Level:** Level {player_data['level']}")
+        
+        # Kingdom
+        if "kingdom" in player_data:
+            lines.append(f"🌍 **Kingdom:** {player_data['kingdom']}")
 
         return "\n".join(lines)
