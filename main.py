@@ -8,8 +8,8 @@ from discord.ext import commands
 from google import genai
 
 from config import BotConfig
-from services import TranslationService, EventSchedulerService
-from handlers import TranslationHandler, EventHandler
+from handlers import EventHandler, PlayerInfoHandler, TranslationHandler
+from services import EventSchedulerService, PlayerInfoService, TranslationService
 
 
 class TranslatorBot:
@@ -34,12 +34,12 @@ class TranslatorBot:
         gemini_client = genai.Client()
         self.translation_service = TranslationService(gemini_client)
         self.event_scheduler_service = EventSchedulerService()
+        self.player_info_service = PlayerInfoService()
 
         # Initialize handlers
-        self.translation_handler = TranslationHandler(
-            self.translation_service, self.bot
-        )
+        self.translation_handler = TranslationHandler(self.translation_service, self.bot)
         self.event_handler = EventHandler(self.event_scheduler_service, self.bot)
+        self.player_info_handler = PlayerInfoHandler(self.player_info_service, self.bot)
 
         # Setup bot
         self._setup_events()
@@ -60,6 +60,7 @@ class TranslatorBot:
         self.translation_handler.register_commands()
         self.translation_handler.register_events()
         self.event_handler.register_commands()
+        self.player_info_handler.register_commands()
 
     def run(self):
         """Start the bot."""

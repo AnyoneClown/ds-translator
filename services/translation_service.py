@@ -1,10 +1,9 @@
-"""Translation service - Single Responsibility Principle."""
-
 import json
 import re
-from typing import Dict, Optional
-from google import genai
 from abc import ABC, abstractmethod
+from typing import Dict, Optional
+
+from google import genai
 
 
 class ITranslationService(ABC):
@@ -16,9 +15,7 @@ class ITranslationService(ABC):
         pass
 
     @abstractmethod
-    def translate_to_language(
-        self, text: str, target_language: str
-    ) -> Optional[Dict[str, str]]:
+    def translate_to_language(self, text: str, target_language: str) -> Optional[Dict[str, str]]:
         """Translate text to a specific language."""
         pass
 
@@ -72,7 +69,7 @@ Respond ONLY with a JSON object in this exact format:
 
         try:
             response = self._client.models.generate_content(
-                model="gemma-3-12b-it",
+                model="gemma-3-27b-it",
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=0,
@@ -84,9 +81,7 @@ Respond ONLY with a JSON object in this exact format:
             print(f"Translation to English failed: {e}")
             return None
 
-    def translate_to_language(
-        self, text: str, target_language: str
-    ) -> Optional[Dict[str, str]]:
+    def translate_to_language(self, text: str, target_language: str) -> Optional[Dict[str, str]]:
         """
         Translate text to a specified language.
 
@@ -112,7 +107,7 @@ Respond ONLY with a JSON object in this exact format:
 
         try:
             response = self._client.models.generate_content(
-                model="gemma-3-12b-it",
+                model="gemma-3-27b-it",
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=0,

@@ -1,25 +1,18 @@
-"""Event Scheduler Service - Single Responsibility Principle."""
-
-from datetime import datetime, timezone
-from typing import List, Tuple, Dict, Optional
 from abc import ABC, abstractmethod
-import discord
+from datetime import datetime, timezone
+from typing import Dict, List, Tuple
 
 
 class IEventSchedulerService(ABC):
     """Interface for event scheduling - Interface Segregation Principle."""
 
     @abstractmethod
-    def schedule_event(
-        self, channel_id: int, event_time: datetime, role_names: List[str], message: str
-    ) -> bool:
+    def schedule_event(self, channel_id: int, event_time: datetime, role_names: List[str], message: str) -> bool:
         """Schedule a new event."""
         pass
 
     @abstractmethod
-    def get_events_for_channel(
-        self, channel_id: int
-    ) -> List[Tuple[datetime, List[str], str]]:
+    def get_events_for_channel(self, channel_id: int) -> List[Tuple[datetime, List[str], str]]:
         """Get all events for a specific channel."""
         pass
 
@@ -38,9 +31,7 @@ class EventSchedulerService(IEventSchedulerService):
         """Initialize the event scheduler."""
         self._scheduled_events: Dict[int, List[Tuple[datetime, List[str], str]]] = {}
 
-    def schedule_event(
-        self, channel_id: int, event_time: datetime, role_names: List[str], message: str
-    ) -> bool:
+    def schedule_event(self, channel_id: int, event_time: datetime, role_names: List[str], message: str) -> bool:
         """
         Schedule a new event.
 
@@ -64,9 +55,7 @@ class EventSchedulerService(IEventSchedulerService):
         self._scheduled_events[channel_id].sort(key=lambda x: x[0])
         return True
 
-    def get_events_for_channel(
-        self, channel_id: int
-    ) -> List[Tuple[datetime, List[str], str]]:
+    def get_events_for_channel(self, channel_id: int) -> List[Tuple[datetime, List[str], str]]:
         """
         Get all scheduled events for a channel.
 
