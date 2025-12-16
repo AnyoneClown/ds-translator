@@ -5,3 +5,5 @@ services:
     container_name: discord-translator-bot
     env_file:
       - .env
+    volumes:
+      - ./logs:/app/logs

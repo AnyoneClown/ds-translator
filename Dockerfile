@@ -38,11 +38,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
     python -m pip install -r requirements.txt
 
-# Switch to the non-privileged user to run the application.
-USER appuser
-
 # Copy the source code into the container.
 COPY . .
+
+# Create logs directory and set permissions before switching user
+RUN mkdir -p /app/logs && chown -R appuser:appuser /app/logs
+
+# Switch to the non-privileged user to run the application.
+USER appuser
 
 # Run the application.
 CMD ["python3", "main.py"]

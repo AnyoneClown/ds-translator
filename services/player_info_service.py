@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
+import logging
 
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 
 class IPlayerInfoService(ABC):
@@ -25,6 +28,7 @@ class PlayerInfoService(IPlayerInfoService):
         """
         self._api_base_url = api_base_url
         self._endpoint = f"{api_base_url}/player-info"
+        logger.info(f"PlayerInfoService initialized with endpoint: {self._endpoint}")
 
     async def get_player_info(self, player_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -36,6 +40,7 @@ class PlayerInfoService(IPlayerInfoService):
         Returns:
             Dictionary containing player information, or None if request failed
         """
+        logger.info(f"Fetching player info for ID: {player_id}")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -43,17 +48,26 @@ class PlayerInfoService(IPlayerInfoService):
                 ) as response:
                     if response.status == 200:
                         response = await response.json()
-                        return response.get("data")
+                        player_data = response.get("data")
+                        if player_data:
+                            logger.info(
+                                f"Successfully fetched player info for ID {player_id}: "
+                                f"{player_data.get('name', 'Unknown')} (Kingdom {player_data.get('kingdom', 'N/A')})"
+                            )
+                        else:
+                            logger.warning(f"API returned 200 but no data for player ID: {player_id}")
+                        return player_data
                     elif response.status == 404:
+                        logger.warning(f"Player not found: {player_id}")
                         return None
                     else:
-                        print(f"API error: Status {response.status}")
+                        logger.error(f"API error for player {player_id}: Status {response.status}")
                         return None
         except aiohttp.ClientError as e:
-            print(f"Network error fetching player info: {e}")
+            logger.error(f"Network error fetching player info for {player_id}: {e}", exc_info=True)
             return None
         except Exception as e:
-            print(f"Unexpected error fetching player info: {e}")
+            logger.error(f"Unexpected error fetching player info for {player_id}: {e}", exc_info=True)
             return None
 
     def format_player_stats(self, player_data: Dict[str, Any]) -> str:

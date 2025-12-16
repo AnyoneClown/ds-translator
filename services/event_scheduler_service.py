@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class IEventSchedulerService(ABC):
@@ -30,6 +33,7 @@ class EventSchedulerService(IEventSchedulerService):
     def __init__(self):
         """Initialize the event scheduler."""
         self._scheduled_events: Dict[int, List[Tuple[datetime, List[str], str]]] = {}
+        logger.info("EventSchedulerService initialized")
 
     def schedule_event(self, channel_id: int, event_time: datetime, role_names: List[str], message: str) -> bool:
         """
@@ -45,6 +49,7 @@ class EventSchedulerService(IEventSchedulerService):
             True if scheduled successfully
         """
         if event_time <= datetime.now(timezone.utc):
+            logger.warning(f"Attempted to schedule event in the past for channel {channel_id}")
             return False
 
         if channel_id not in self._scheduled_events:
@@ -53,6 +58,7 @@ class EventSchedulerService(IEventSchedulerService):
         self._scheduled_events[channel_id].append((event_time, role_names, message))
         # Sort events by time
         self._scheduled_events[channel_id].sort(key=lambda x: x[0])
+        logger.info(f"Event scheduled for channel {channel_id} at {event_time}: {message[:50]}...")
         return True
 
     def get_events_for_channel(self, channel_id: int) -> List[Tuple[datetime, List[str], str]]:

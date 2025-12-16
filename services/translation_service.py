@@ -2,8 +2,11 @@ import json
 import re
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
+import logging
 
 from google import genai
+
+logger = logging.getLogger(__name__)
 
 
 class ITranslationService(ABC):
@@ -26,7 +29,8 @@ class TranslationService(ITranslationService):
     def __init__(self, client: genai.Client):
         """Initialize translation service with Gemini client - Dependency Injection."""
         self._client = client
-        print(client.models.list())
+        logger.info("TranslationService initialized with Gemini client")
+        logger.debug(f"Available models: {client.models.list()}")
 
     def _clean_text(self, text: str) -> str:
         """Remove emojis and special characters from text."""
