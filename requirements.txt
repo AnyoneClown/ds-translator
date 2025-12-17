@@ -33,3 +33,10 @@ typing_extensions==4.15.0
 urllib3==2.5.0
 websockets==15.0.1
 yarl==1.22.0
+
+# Database dependencies
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+psycopg2-binary==2.9.10
+sqlalchemy-cockroachdb==2.0.2

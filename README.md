@@ -7,6 +7,8 @@ A Discord bot that translates messages using Google's Gemini API, built with SOL
 - 🌐 **Auto-translation**: Automatically translate messages from users with the "Translator" role
 - 🔄 **Manual translation**: Translate messages to English or any language on command
 - ⏰ **Event scheduling**: Schedule role pings at specific times (UTC)
+- 📊 **User statistics**: Track translations, messages, and user activity
+- 💾 **Database integration**: CockroachDB with SQLAlchemy for persistent storage
 - 🏗️ **SOLID architecture**: Clean, maintainable, and extensible code structure
 
 ## Architecture
@@ -35,13 +37,24 @@ ds-translator/
 ├── services/
 │   ├── __init__.py
 │   ├── translation_service.py  # Translation business logic
-│   └── event_scheduler_service.py  # Event scheduling logic
+│   ├── event_scheduler_service.py  # Event scheduling logic
+│   └── database_service.py    # Database operations
 ├── handlers/
 │   ├── __init__.py
 │   ├── translation_handler.py  # Translation command handlers
-│   └── event_handler.py        # Event command handlers
-├── main.py                     # Application entry point
-└── requirements.txt
+│   ├── event_handler.py        # Event command handlers
+│   └── database_handler.py     # Stats and user commands
+├── db/
+│   ├── __init__.py
+│   ├── models.py              # SQLAlchemy models
+│   └── session.py             # Database session management
+├── alembic/                   # Database migrations
+│   ├── versions/
+│   └── env.py
+├── main.py                    # Application entry point
+├── test_db.py                 # Database test script
+├── requirements.txt
+└── DATABASE.md                # Database documentation
 ```
 
 ## Installation
@@ -57,6 +70,17 @@ pip install -r requirements.txt
 DISCORD_TOKEN=your_discord_bot_token
 COMMAND_PREFIX=!
 TRANSLATOR_ROLE=Translator
+COCKROACHDB_URL=cockroachdb+asyncpg://user:password@host:26257/database
+```
+
+4. Run database migrations:
+```bash
+python -m alembic upgrade head
+```
+
+5. Test database connection (optional):
+```bash
+python test_db.py
 ```
 
 ## Commands
@@ -66,11 +90,19 @@ TRANSLATOR_ROLE=Translator
 - `!en` - Translate a replied-to message to English
 - `!t <language>` or `!translate <language>` - Translate to specified language
 
+### Player Stats Commands
+
+- `!stats <player_id>` - Fetch and display player statistics from kingshot.net API
+
 ### Event Scheduling Commands
 
 - `!schedule YYYY-MM-DD HH:MM @Role1 @Role2 Message` - Schedule a role ping
 - `!events` - List all scheduled events in the channel
 - `!cancel <number>` - Cancel a scheduled event
+
+### User Statistics Commands
+
+- `!profile [@user]` - Show user profile (yours or another user's)
 
 ### Examples
 
@@ -89,11 +121,30 @@ List all scheduled events
 
 !cancel 1
 Cancel the first scheduled event
+
+!stats 123456789
+Fetch player statistics from API
+
+!profile @SomeUser
+View another user's profile
 ```
 
 ## Auto-Translation
 
 Users with the "Translator" role will have their messages automatically translated to English.
+
+## Database
+
+The bot uses CockroachDB (PostgreSQL-compatible) for persistent storage of:
+- User information and activity tracking
+- Translation statistics
+- Translation logs
+
+See [DATABASE.md](DATABASE.md) for detailed documentation on:
+- Database schema and models
+- Migration management with Alembic
+- Using DatabaseService in your code
+- Best practices and troubleshooting
 
 ## Development
 

@@ -1,0 +1,95 @@
+"""Database models for the bot."""
+
+from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    """Base class for all database models."""
+
+    pass
+
+
+class User(Base):
+    """User model to track Discord users."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # Discord user ID
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    discriminator: Mapped[str] = mapped_column(String(10), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+    # Relationships
+    translation_logs: Mapped[List["TranslationLog"]] = relationship("TranslationLog", back_populates="user")
+    player_lookups: Mapped[List["PlayerLookupLog"]] = relationship("PlayerLookupLog", back_populates="user")
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, username={self.username})>"
+
+
+class TranslationLog(Base):
+    """Log of all translations performed by the bot."""
+
+    __tablename__ = "translation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    source_language: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    target_language: Mapped[str] = mapped_column(String(50), nullable=False)
+    original_text: Mapped[str] = mapped_column(Text, nullable=False)
+    translated_text: Mapped[str] = mapped_column(Text, nullable=False)
+    translation_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="manual"  # manual, reaction, command, etc.
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="translation_logs")
+
+    def __repr__(self) -> str:
+        return f"<TranslationLog(id={self.id}, user_id={self.user_id}, target_language={self.target_language})>"
+
+
+class PlayerLookupLog(Base):
+    """Log of all player stats lookups."""
+
+    __tablename__ = "player_lookup_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    kingshot_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    kingshot_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    kingdom: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    castle_level: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    success: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="player_lookups")
+
+    def __repr__(self) -> str:
+        return f"<PlayerLookupLog(id={self.id}, user_id={self.user_id}, player_id={self.kingshot_id})>"

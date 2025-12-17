@@ -1,9 +1,13 @@
-from typing import Optional
+import logging
 
 import discord
 from discord.ext import commands
 
+from db import get_db
+from services.database_service import DatabaseService
 from services.translation_service import ITranslationService
+
+logger = logging.getLogger(__name__)
 
 
 class TranslationHandler:
@@ -72,7 +76,29 @@ class TranslationHandler:
                 result = self._translation_service.translate_to_language(text_to_translate, target_language)
 
             if result:
-                await ctx.reply(f"Translated to {target_language}:\n> {result.get('text')}")
+                translated_text = result.get("text")
+                await ctx.reply(f"Translated to {target_language}:\n> {translated_text}")
+
+                # Track in database
+                try:
+                    db = get_db()
+                    async with db.session() as session:
+                        await DatabaseService.get_or_create_user(
+                            session, ctx.author.id, ctx.author.name, ctx.author.discriminator, ctx.author.display_name
+                        )
+                        await DatabaseService.log_translation(
+                            session,
+                            user_id=ctx.author.id,
+                            original_text=text_to_translate,
+                            translated_text=translated_text,
+                            target_language=target_language,
+                            source_language=result.get("language"),
+                            translation_type="command",
+                            guild_id=ctx.guild.id if ctx.guild else None,
+                            channel_id=ctx.channel.id,
+                        )
+                except Exception as db_error:
+                    logger.error(f"Database tracking error: {db_error}", exc_info=True)
             else:
                 await ctx.reply(f"Sorry, I couldn't translate that to {target_language}.")
         except Exception as e:
@@ -97,7 +123,29 @@ class TranslationHandler:
 
             if result and result.get("language") != "English":
                 translated_text = result.get("text")
-                await ctx.reply(f"Translated from {result.get('language')}:\n> {translated_text}")
+                source_language = result.get("language")
+                await ctx.reply(f"Translated from {source_language}:\n> {translated_text}")
+
+                # Track in database
+                try:
+                    db = get_db()
+                    async with db.session() as session:
+                        await DatabaseService.get_or_create_user(
+                            session, ctx.author.id, ctx.author.name, ctx.author.discriminator, ctx.author.display_name
+                        )
+                        await DatabaseService.log_translation(
+                            session,
+                            user_id=ctx.author.id,
+                            original_text=text_to_translate,
+                            translated_text=translated_text,
+                            target_language="en",
+                            source_language=source_language,
+                            translation_type="command",
+                            guild_id=ctx.guild.id if ctx.guild else None,
+                            channel_id=ctx.channel.id,
+                        )
+                except Exception as db_error:
+                    logger.error(f"Database tracking error: {db_error}", exc_info=True)
             elif result:
                 await ctx.reply("The message is already in English.")
             else:
@@ -123,9 +171,35 @@ class TranslationHandler:
 
             if result and result.get("language") != "English":
                 translated_text = result.get("text")
+                source_language = result.get("language")
                 await message.reply(f"> {translated_text}")
+
+                # Track in database
+                try:
+                    db = get_db()
+                    async with db.session() as session:
+                        await DatabaseService.get_or_create_user(
+                            session,
+                            message.author.id,
+                            message.author.name,
+                            message.author.discriminator,
+                            message.author.display_name,
+                        )
+                        await DatabaseService.log_translation(
+                            session,
+                            user_id=message.author.id,
+                            original_text=message.content,
+                            translated_text=translated_text,
+                            target_language="en",
+                            source_language=source_language,
+                            translation_type="auto",
+                            guild_id=message.guild.id if message.guild else None,
+                            channel_id=message.channel.id,
+                        )
+                except Exception as db_error:
+                    logger.error(f"Database tracking error: {db_error}", exc_info=True)
         except Exception as e:
-            print(f"Auto-translation error: {e}")
+            logger.error(f"Auto-translation error: {e}", exc_info=True)
             await message.channel.send("Sorry, I couldn't translate that.")
 
     async def _handle_command_error(self, ctx, error):

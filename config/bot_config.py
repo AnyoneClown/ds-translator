@@ -11,6 +11,7 @@ class BotConfig:
     """Bot configuration settings."""
 
     discord_token: str
+    database_url: str
     command_prefix: str = "!"
     translator_role_name: str = "Translator"
 
@@ -23,8 +24,13 @@ class BotConfig:
         if not discord_token:
             raise ValueError("DISCORD_TOKEN not found in environment variables")
 
+        database_url = os.getenv("COCKROACHDB_URL")
+        if not database_url:
+            raise ValueError("COCKROACHDB_URL not found in environment variables")
+
         return cls(
             discord_token=discord_token,
+            database_url=database_url,
             command_prefix=os.getenv("COMMAND_PREFIX", "!"),
             translator_role_name=os.getenv("TRANSLATOR_ROLE", "Translator"),
         )

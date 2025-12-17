@@ -1,8 +1,8 @@
 import json
+import logging
 import re
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
-import logging
 
 from google import genai
 

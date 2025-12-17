@@ -3,15 +3,17 @@ Discord Translation Bot - Main Entry Point
 Follows SOLID principles for maintainability and extensibility.
 """
 
-import discord
-from discord.ext import commands
-from google import genai
 import logging
 import os
 
+import discord
+from discord.ext import commands
+from google import genai
+
 from config import BotConfig
 from config.logging_config import setup_logging
-from handlers import EventHandler, PlayerInfoHandler, TranslationHandler
+from db import init_db
+from handlers import DatabaseHandler, EventHandler, PlayerInfoHandler, TranslationHandler
 from services import EventSchedulerService, PlayerInfoService, TranslationService
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,11 @@ class TranslatorBot:
         """
         self.config = config
         logger.info("Initializing TranslatorBot")
+
+        # Initialize database
+        logger.info("Initializing database...")
+        self.db_manager = init_db(config.database_url)
+        logger.info("Database manager initialized")
 
         # Setup Discord bot
         intents = discord.Intents.default()
@@ -50,6 +57,7 @@ class TranslatorBot:
         self.translation_handler = TranslationHandler(self.translation_service, self.bot)
         self.event_handler = EventHandler(self.event_scheduler_service, self.bot)
         self.player_info_handler = PlayerInfoHandler(self.player_info_service, self.bot)
+        self.database_handler = DatabaseHandler(self.bot)
         logger.info("All handlers initialized")
 
         # Setup bot
@@ -70,9 +78,18 @@ class TranslatorBot:
             for guild in self.bot.guilds:
                 logger.info(f"  - {guild.name} (ID: {guild.id}) - {guild.member_count} members")
             logger.info("=" * 80)
+
+            # Test database connection
+            try:
+                async with self.db_manager.session() as session:
+                    await session.execute("SELECT 1")
+                    logger.info("✅ Database connection successful")
+            except Exception as e:
+                logger.error(f"❌ Database connection failed: {e}")
+
             self.event_handler.start_scheduler_task()
             logger.info("Event scheduler task started")
-        
+
         @self.bot.event
         async def on_command_error(ctx, error):
             """Handle command errors."""
@@ -83,16 +100,19 @@ class TranslatorBot:
                 await ctx.send(f"❌ Missing required argument: {error.param.name}")
             elif isinstance(error, commands.BadArgument):
                 logger.warning(f"Bad argument for command by {ctx.author}: {ctx.command} - {error}")
-                await ctx.send(f"❌ Invalid argument provided")
+                await ctx.send("❌ Invalid argument provided")
             else:
-                logger.error(f"Command error in {ctx.command} by {ctx.author}: {error}", exc_info=error)
-                await ctx.send(f"❌ An error occurred while processing the command")
-        
+                logger.error(
+                    f"Command error in {ctx.command} by {ctx.author}: {error}",
+                    exc_info=error,
+                )
+                await ctx.send("❌ An error occurred while processing the command")
+
         @self.bot.event
         async def on_guild_join(guild):
             """Log when bot joins a guild."""
             logger.info(f"Bot joined new guild: {guild.name} (ID: {guild.id}) - {guild.member_count} members")
-        
+
         @self.bot.event
         async def on_guild_remove(guild):
             """Log when bot leaves a guild."""
@@ -105,6 +125,8 @@ class TranslatorBot:
         self.translation_handler.register_events()
         self.event_handler.register_commands()
         self.player_info_handler.register_commands()
+        self.database_handler.register_commands()
+        self.database_handler.register_events()
         logger.info("All command handlers registered")
 
     def run(self):
@@ -117,6 +139,15 @@ class TranslatorBot:
         except Exception as e:
             logger.critical(f"Fatal error running bot: {e}", exc_info=True)
             raise
+        finally:
+            # Cleanup database connections
+            import asyncio
+
+            try:
+                asyncio.run(self.db_manager.close())
+                logger.info("Database connections closed")
+            except Exception as e:
+                logger.error(f"Error closing database: {e}")
 
 
 def main():
@@ -124,9 +155,9 @@ def main():
     # Setup logging first
     log_level = os.getenv("LOG_LEVEL", "INFO")
     setup_logging(log_level)
-    
+
     logger.info("Starting Discord Translator Bot application")
-    
+
     try:
         config = BotConfig.from_env()
         bot = TranslatorBot(config)

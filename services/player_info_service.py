@@ -1,6 +1,6 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
-import logging
 
 import aiohttp
 
@@ -44,7 +44,9 @@ class PlayerInfoService(IPlayerInfoService):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    self._endpoint, params={"playerId": player_id}, timeout=aiohttp.ClientTimeout(total=10)
+                    self._endpoint,
+                    params={"playerId": player_id},
+                    timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status == 200:
                         response = await response.json()
@@ -64,10 +66,16 @@ class PlayerInfoService(IPlayerInfoService):
                         logger.error(f"API error for player {player_id}: Status {response.status}")
                         return None
         except aiohttp.ClientError as e:
-            logger.error(f"Network error fetching player info for {player_id}: {e}", exc_info=True)
+            logger.error(
+                f"Network error fetching player info for {player_id}: {e}",
+                exc_info=True,
+            )
             return None
         except Exception as e:
-            logger.error(f"Unexpected error fetching player info for {player_id}: {e}", exc_info=True)
+            logger.error(
+                f"Unexpected error fetching player info for {player_id}: {e}",
+                exc_info=True,
+            )
             return None
 
     def format_player_stats(self, player_data: Dict[str, Any]) -> str:
@@ -85,24 +93,24 @@ class PlayerInfoService(IPlayerInfoService):
 
         # Format with emojis
         lines = []
-        
+
         # Name
         if "name" in player_data:
             lines.append(f"👤 **Name:** {player_data['name']}")
-        
+
         # Player ID
         if "playerId" in player_data:
             lines.append(f"🆔 **ID:** {player_data['playerId']}")
-        
+
         # Castle Level
         if "levelRendered" in player_data:
-            level_info = player_data['levelRendered']
+            level_info = player_data["levelRendered"]
             if "levelRenderedDetailed" in player_data:
-                level_info = player_data['levelRenderedDetailed']
+                level_info = player_data["levelRenderedDetailed"]
             lines.append(f"🏰 **Castle Level:** {level_info}")
         elif "level" in player_data:
             lines.append(f"🏰 **Castle Level:** Level {player_data['level']}")
-        
+
         # Kingdom
         if "kingdom" in player_data:
             lines.append(f"🌍 **Kingdom:** {player_data['kingdom']}")

@@ -1,7 +1,7 @@
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
-import logging
 
 logger = logging.getLogger(__name__)
 
