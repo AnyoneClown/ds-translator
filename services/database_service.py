@@ -128,7 +128,7 @@ class DatabaseService:
         player_id: str,
         player_name: Optional[str] = None,
         kingdom: Optional[str] = None,
-        castle_level: Optional[int] = None,
+        castle_level: Optional[str] = None,
         success: bool = True,
         guild_id: Optional[int] = None,
         channel_id: Optional[int] = None,

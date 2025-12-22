@@ -127,7 +127,7 @@ class PlayerInfoHandler:
                         player_id=player_id,
                         player_name=player_name,
                         kingdom=str(player_data.get("kingdom")) if player_data.get("kingdom") else None,
-                        castle_level=player_data.get("castleLevel"),
+                        castle_level=player_data.get("levelRenderedDetailed"),
                         success=True,
                         guild_id=ctx.guild.id if ctx.guild else None,
                         channel_id=ctx.channel.id,
