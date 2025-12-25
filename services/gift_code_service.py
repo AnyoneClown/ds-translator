@@ -1,8 +1,12 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import aiohttp
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.models import GiftCodeRedemption
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +15,20 @@ class IGiftCodeService(ABC):
     """Interface for gift code service - Interface Segregation Principle."""
 
     @abstractmethod
-    async def redeem_gift_code(self, player_id: int, gift_code: str) -> Dict[str, Any]:
+    async def redeem_gift_code(self, session: AsyncSession, player_id: int, gift_code: str) -> Dict[str, Any]:
         """Redeem a gift code for a player."""
+        pass
+
+    @abstractmethod
+    async def check_already_redeemed(
+        self, session: AsyncSession, player_id: int, gift_code: str
+    ) -> Optional[GiftCodeRedemption]:
+        """Check if a gift code has already been successfully redeemed for a player."""
+        pass
+
+    @abstractmethod
+    async def get_redeemed_players(self, session: AsyncSession, gift_code: str) -> set[str]:
+        """Get set of player IDs who have already successfully redeemed this gift code."""
         pass
 
 
@@ -30,17 +46,76 @@ class GiftCodeService(IGiftCodeService):
         self._endpoint = f"{api_base_url}/gift-codes/redeem"
         logger.info(f"GiftCodeService initialized with endpoint: {self._endpoint}")
 
-    async def redeem_gift_code(self, player_id: int, gift_code: str) -> Dict[str, Any]:
+    async def check_already_redeemed(
+        self, session: AsyncSession, player_id: int, gift_code: str
+    ) -> Optional[GiftCodeRedemption]:
+        """
+        Check if a gift code has already been successfully redeemed for a player.
+
+        Args:
+            session: Database session
+            player_id: The player ID to check
+            gift_code: The gift code to check
+
+        Returns:
+            GiftCodeRedemption object if already redeemed successfully, None otherwise
+        """
+        result = await session.execute(
+            select(GiftCodeRedemption)
+            .where(GiftCodeRedemption.player_id == str(player_id))
+            .where(GiftCodeRedemption.gift_code == gift_code)
+            .where(GiftCodeRedemption.success.is_(True))
+            .order_by(GiftCodeRedemption.created_at.desc())
+        )
+        return result.scalar_one_or_none()
+
+    async def get_redeemed_players(self, session: AsyncSession, gift_code: str) -> set[str]:
+        """
+        Get set of player IDs who have already successfully redeemed this gift code.
+        This is more efficient than checking each player individually.
+
+        Args:
+            session: Database session
+            gift_code: The gift code to check
+
+        Returns:
+            Set of player IDs (as strings) that have already redeemed this code
+        """
+        result = await session.execute(
+            select(GiftCodeRedemption.player_id)
+            .where(GiftCodeRedemption.gift_code == gift_code)
+            .where(GiftCodeRedemption.success.is_(True))
+        )
+        player_ids = result.scalars().all()
+        return set(player_ids)
+
+    async def redeem_gift_code(self, session: AsyncSession, player_id: int, gift_code: str) -> Dict[str, Any]:
         """
         Redeem a gift code for a player.
 
         Args:
+            session: Database session
             player_id: The player ID to redeem the code for
             gift_code: The gift code to redeem
 
         Returns:
             Dictionary containing the API response with status, message, and data
         """
+        # Check if already redeemed
+        existing_redemption = await self.check_already_redeemed(session, player_id, gift_code)
+        if existing_redemption:
+            logger.info(
+                f"Gift code '{gift_code}' already redeemed for player {player_id} at {existing_redemption.created_at}. "
+                f"Skipping API call."
+            )
+            return {
+                "success": False,
+                "message": "This gift code has already been redeemed for this player.",
+                "error_code": "ALREADY_REDEEMED",
+                "already_redeemed": True,
+                "redeemed_at": existing_redemption.created_at.isoformat(),
+            }
+
         logger.info(f"Redeeming gift code '{gift_code}' for player ID: {player_id}")
 
         payload = {"playerId": player_id, "giftCode": gift_code}
@@ -72,6 +147,31 @@ class GiftCodeService(IGiftCodeService):
                             meta = response_data["meta"]
                             error_code = meta.get("code")
                             error_details = meta.get("details", {}).get("code")
+
+                        # Check if the error indicates the code was already redeemed
+                        already_redeemed_phrases = [
+                            "already redeemed",
+                            "already been redeemed",
+                            "already used",
+                            "already claimed",
+                        ]
+                        is_already_redeemed = any(
+                            phrase in error_message.lower() for phrase in already_redeemed_phrases
+                        )
+
+                        if is_already_redeemed:
+                            logger.info(
+                                f"Gift code '{gift_code}' was already redeemed for player {player_id} "
+                                f"(detected from API response)"
+                            )
+                            return {
+                                "success": True,  # Treat as success to prevent future attempts
+                                "message": error_message,
+                                "error_code": error_code,
+                                "error_details": error_details,
+                                "timestamp": response_data.get("timestamp"),
+                                "already_redeemed_by_api": True,
+                            }
 
                         logger.warning(
                             f"Failed to redeem gift code '{gift_code}' for player {player_id}: "

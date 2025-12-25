@@ -108,12 +108,33 @@ class GiftCodeHandler:
                     f"⏳ This may take a moment..."
                 )
 
+                # Get all players who have already redeemed this code (single DB query)
+                already_redeemed = await self._gift_code_service.get_redeemed_players(session, gift_code)
+                logger.info(f"Found {len(already_redeemed)} players who already redeemed code '{gift_code}'")
+
                 # Redeem for each player
                 results = []
                 for player in registered_players:
                     try:
+                        # Check if already redeemed (in-memory check, not DB query)
+                        if player.player_id in already_redeemed:
+                            logger.info(
+                                f"Skipping gift code '{gift_code}' for player {player.player_id} - already redeemed"
+                            )
+                            results.append(
+                                {
+                                    "player_id": player.player_id,
+                                    "player_name": player.player_name,
+                                    "success": False,
+                                    "message": "Already redeemed",
+                                    "error_code": "ALREADY_REDEEMED",
+                                    "already_redeemed": True,
+                                }
+                            )
+                            continue
+
                         player_id_int = int(player.player_id)
-                        result = await self._gift_code_service.redeem_gift_code(player_id_int, gift_code)
+                        result = await self._gift_code_service.redeem_gift_code(session, player_id_int, gift_code)
 
                         # Log to database
                         await DatabaseService.log_gift_code_redemption(
@@ -135,6 +156,7 @@ class GiftCodeHandler:
                                 "success": result.get("success", False),
                                 "message": result.get("message", "Unknown error"),
                                 "error_code": result.get("error_code"),
+                                "already_redeemed": result.get("already_redeemed", False),
                             }
                         )
                     except ValueError:
