@@ -72,6 +72,8 @@ class GiftCodeService(IGiftCodeService):
     async def get_redeemed_players(self, session: AsyncSession, gift_code: str) -> set[str]:
         """
         Get set of player IDs who have already successfully redeemed this gift code.
+        This includes both successful redemptions and failed attempts where the API
+        indicated the code was already redeemed.
         This is more efficient than checking each player individually.
 
         Args:
@@ -81,10 +83,18 @@ class GiftCodeService(IGiftCodeService):
         Returns:
             Set of player IDs (as strings) that have already redeemed this code
         """
+        from sqlalchemy import or_
+        
+        # Get successful redemptions OR failed redemptions with already-redeemed indicators
         result = await session.execute(
             select(GiftCodeRedemption.player_id)
             .where(GiftCodeRedemption.gift_code == gift_code)
-            .where(GiftCodeRedemption.success.is_(True))
+            .where(
+                or_(
+                    GiftCodeRedemption.success.is_(True),
+                    GiftCodeRedemption.error_code == "ALREADY_REDEEMED_BY_API",
+                )
+            )
         )
         player_ids = result.scalars().all()
         return set(player_ids)
@@ -165,9 +175,9 @@ class GiftCodeService(IGiftCodeService):
                                 f"(detected from API response)"
                             )
                             return {
-                                "success": True,  # Treat as success to prevent future attempts
+                                "success": False,  # Log as failed
                                 "message": error_message,
-                                "error_code": error_code,
+                                "error_code": "ALREADY_REDEEMED_BY_API",  # Special code to identify and skip next time
                                 "error_details": error_details,
                                 "timestamp": response_data.get("timestamp"),
                                 "already_redeemed_by_api": True,
