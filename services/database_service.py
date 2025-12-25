@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import PlayerLookupLog, TranslationLog, User
+from db.models import GiftCodeRedemption, PlayerLookupLog, RegisteredPlayer, TranslationLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -164,3 +164,194 @@ class DatabaseService:
         await session.flush()
         logger.info(f"Logged player lookup by user {user_id}: player {player_id} (success={success})")
         return log
+
+    @staticmethod
+    async def log_gift_code_redemption(
+        session: AsyncSession,
+        user_id: int,
+        player_id: str,
+        gift_code: str,
+        success: bool,
+        response_message: Optional[str] = None,
+        error_code: Optional[str] = None,
+        guild_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+    ) -> GiftCodeRedemption:
+        """
+        Log a gift code redemption attempt to the database.
+
+        Args:
+            session: Database session
+            user_id: Discord user ID who requested the redemption
+            player_id: The player ID for whom the code was redeemed
+            gift_code: The gift code that was used
+            success: Whether the redemption was successful
+            response_message: Response message from the API
+            error_code: Error code if redemption failed
+            guild_id: Discord guild ID (optional)
+            channel_id: Discord channel ID (optional)
+
+        Returns:
+            GiftCodeRedemption object
+        """
+        log = GiftCodeRedemption(
+            user_id=user_id,
+            player_id=player_id,
+            gift_code=gift_code,
+            success=success,
+            response_message=response_message,
+            error_code=error_code,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        session.add(log)
+        await session.flush()
+        logger.info(
+            f"Logged gift code redemption by user {user_id}: "
+            f"player {player_id}, code '{gift_code}' (success={success})"
+        )
+        return log
+
+    @staticmethod
+    async def add_registered_player(
+        session: AsyncSession,
+        player_id: str,
+        added_by_user_id: int,
+        player_name: Optional[str] = None,
+        enabled: bool = True,
+    ) -> RegisteredPlayer:
+        """
+        Add or update a registered player for gift code redemption.
+
+        Args:
+            session: Database session
+            player_id: The player ID to register
+            added_by_user_id: Discord user ID who added the player
+            player_name: Player name (optional)
+            enabled: Whether the player is enabled for redemption
+
+        Returns:
+            RegisteredPlayer object
+        """
+        # Check if player already exists
+        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
+        existing_player = result.scalar_one_or_none()
+
+        if existing_player:
+            # Update existing player
+            existing_player.enabled = enabled
+            if player_name:
+                existing_player.player_name = player_name
+            existing_player.added_by_user_id = added_by_user_id
+            await session.flush()
+            logger.info(f"Updated registered player {player_id} (enabled={enabled})")
+            return existing_player
+        else:
+            # Create new registered player
+            player = RegisteredPlayer(
+                player_id=player_id,
+                player_name=player_name,
+                enabled=enabled,
+                added_by_user_id=added_by_user_id,
+            )
+            session.add(player)
+            await session.flush()
+            logger.info(f"Added new registered player {player_id} by user {added_by_user_id}")
+            return player
+
+    @staticmethod
+    async def get_registered_players(
+        session: AsyncSession,
+        enabled_only: bool = True,
+    ) -> list[RegisteredPlayer]:
+        """
+        Get all registered players.
+
+        Args:
+            session: Database session
+            enabled_only: If True, only return enabled players
+
+        Returns:
+            List of RegisteredPlayer objects
+        """
+        query = select(RegisteredPlayer)
+        if enabled_only:
+            query = query.where(RegisteredPlayer.enabled.is_(True))
+        query = query.order_by(RegisteredPlayer.player_id)
+
+        result = await session.execute(query)
+        players = result.scalars().all()
+        logger.info(f"Retrieved {len(players)} registered players (enabled_only={enabled_only})")
+        return list(players)
+
+    @staticmethod
+    async def get_registered_player(
+        session: AsyncSession,
+        player_id: str,
+    ) -> Optional[RegisteredPlayer]:
+        """
+        Get a single registered player by ID.
+
+        Args:
+            session: Database session
+            player_id: The player ID to look up
+
+        Returns:
+            RegisteredPlayer or None
+        """
+        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def remove_registered_player(
+        session: AsyncSession,
+        player_id: str,
+    ) -> bool:
+        """
+        Remove a registered player.
+
+        Args:
+            session: Database session
+            player_id: The player ID to remove
+
+        Returns:
+            True if player was removed, False if not found
+        """
+        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
+        player = result.scalar_one_or_none()
+
+        if player:
+            await session.delete(player)
+            await session.flush()
+            logger.info(f"Removed registered player {player_id}")
+            return True
+        else:
+            logger.warning(f"Attempted to remove non-existent player {player_id}")
+            return False
+
+    @staticmethod
+    async def toggle_registered_player(
+        session: AsyncSession,
+        player_id: str,
+    ) -> Optional[bool]:
+        """
+        Toggle a registered player's enabled status.
+
+        Args:
+            session: Database session
+            player_id: The player ID to toggle
+
+        Returns:
+            New enabled status, or None if player not found
+        """
+        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
+        player = result.scalar_one_or_none()
+
+        if player:
+            player.enabled = not player.enabled
+            await session.flush()
+            logger.info(f"Toggled registered player {player_id} to enabled={player.enabled}")
+            return player.enabled
+        else:
+            logger.warning(f"Attempted to toggle non-existent player {player_id}")
+            return None

@@ -2,6 +2,7 @@
 
 from .database_handler import DatabaseHandler
 from .event_handler import EventHandler
+from .gift_code_handler import GiftCodeHandler
 from .player_info_handler import PlayerInfoHandler
 from .translation_handler import TranslationHandler
 
@@ -9,5 +10,6 @@ __all__ = [
     "TranslationHandler",
     "EventHandler",
     "PlayerInfoHandler",
+    "GiftCodeHandler",
     "DatabaseHandler",
 ]

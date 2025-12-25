@@ -13,8 +13,8 @@ from google import genai
 from config import BotConfig
 from config.logging_config import setup_logging
 from db import init_db
-from handlers import DatabaseHandler, EventHandler, PlayerInfoHandler, TranslationHandler
-from services import EventSchedulerService, PlayerInfoService, TranslationService
+from handlers import DatabaseHandler, EventHandler, GiftCodeHandler, PlayerInfoHandler, TranslationHandler
+from services import EventSchedulerService, GiftCodeService, PlayerInfoService, TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ class TranslatorBot:
         self.translation_service = TranslationService(gemini_client)
         self.event_scheduler_service = EventSchedulerService()
         self.player_info_service = PlayerInfoService()
+        self.gift_code_service = GiftCodeService()
         logger.info("All services initialized")
 
         # Initialize handlers
@@ -57,6 +58,7 @@ class TranslatorBot:
         self.translation_handler = TranslationHandler(self.translation_service, self.bot)
         self.event_handler = EventHandler(self.event_scheduler_service, self.bot)
         self.player_info_handler = PlayerInfoHandler(self.player_info_service, self.bot)
+        self.gift_code_handler = GiftCodeHandler(self.gift_code_service, self.player_info_service, self.bot)
         self.database_handler = DatabaseHandler(self.bot)
         logger.info("All handlers initialized")
 
@@ -125,6 +127,7 @@ class TranslatorBot:
         self.translation_handler.register_events()
         self.event_handler.register_commands()
         self.player_info_handler.register_commands()
+        self.gift_code_handler.register_commands()
         self.database_handler.register_commands()
         self.database_handler.register_events()
         logger.info("All command handlers registered")

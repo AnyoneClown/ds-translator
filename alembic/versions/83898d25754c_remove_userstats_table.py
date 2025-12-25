@@ -25,13 +25,25 @@ def upgrade() -> None:
 
     # ### remaining type/index adjustments from autogenerate ###
     op.alter_column(
-        "player_lookup_logs", "user_id", existing_type=sa.INTEGER(), type_=sa.BigInteger(), existing_nullable=False
+        "player_lookup_logs",
+        "user_id",
+        existing_type=sa.INTEGER(),
+        type_=sa.BigInteger(),
+        existing_nullable=False,
     )
     op.alter_column(
-        "player_lookup_logs", "guild_id", existing_type=sa.INTEGER(), type_=sa.BigInteger(), existing_nullable=True
+        "player_lookup_logs",
+        "guild_id",
+        existing_type=sa.INTEGER(),
+        type_=sa.BigInteger(),
+        existing_nullable=True,
     )
     op.alter_column(
-        "player_lookup_logs", "channel_id", existing_type=sa.INTEGER(), type_=sa.BigInteger(), existing_nullable=True
+        "player_lookup_logs",
+        "channel_id",
+        existing_type=sa.INTEGER(),
+        type_=sa.BigInteger(),
+        existing_nullable=True,
     )
     op.alter_column(
         "player_lookup_logs",
@@ -41,26 +53,73 @@ def upgrade() -> None:
         existing_nullable=False,
         existing_server_default=sa.text("now()"),
     )
-    op.drop_index("ix_player_lookup_logs_created_at", table_name="player_lookup_logs", postgresql_using="prefix")
-    op.create_index(op.f("ix_player_lookup_logs_created_at"), "player_lookup_logs", ["created_at"], unique=False)
-    op.drop_index("ix_player_lookup_logs_kingshot_id", table_name="player_lookup_logs", postgresql_using="prefix")
-    op.create_index(op.f("ix_player_lookup_logs_kingshot_id"), "player_lookup_logs", ["kingshot_id"], unique=False)
-    op.drop_index("ix_player_lookup_logs_user_id", table_name="player_lookup_logs", postgresql_using="prefix")
-    op.create_index(op.f("ix_player_lookup_logs_user_id"), "player_lookup_logs", ["user_id"], unique=False)
-    op.alter_column(
-        "translation_logs", "user_id", existing_type=sa.INTEGER(), type_=sa.BigInteger(), existing_nullable=False
+    op.drop_index(
+        "ix_player_lookup_logs_created_at",
+        table_name="player_lookup_logs",
+        postgresql_using="prefix",
+    )
+    op.create_index(
+        op.f("ix_player_lookup_logs_created_at"),
+        "player_lookup_logs",
+        ["created_at"],
+        unique=False,
+    )
+    op.drop_index(
+        "ix_player_lookup_logs_kingshot_id",
+        table_name="player_lookup_logs",
+        postgresql_using="prefix",
+    )
+    op.create_index(
+        op.f("ix_player_lookup_logs_kingshot_id"),
+        "player_lookup_logs",
+        ["kingshot_id"],
+        unique=False,
+    )
+    op.drop_index(
+        "ix_player_lookup_logs_user_id",
+        table_name="player_lookup_logs",
+        postgresql_using="prefix",
+    )
+    op.create_index(
+        op.f("ix_player_lookup_logs_user_id"),
+        "player_lookup_logs",
+        ["user_id"],
+        unique=False,
     )
     op.alter_column(
-        "translation_logs", "guild_id", existing_type=sa.INTEGER(), type_=sa.BigInteger(), existing_nullable=True
+        "translation_logs",
+        "user_id",
+        existing_type=sa.INTEGER(),
+        type_=sa.BigInteger(),
+        existing_nullable=False,
     )
     op.alter_column(
-        "translation_logs", "channel_id", existing_type=sa.INTEGER(), type_=sa.BigInteger(), existing_nullable=True
+        "translation_logs",
+        "guild_id",
+        existing_type=sa.INTEGER(),
+        type_=sa.BigInteger(),
+        existing_nullable=True,
     )
     op.alter_column(
-        "translation_logs", "original_text", existing_type=sa.VARCHAR(), type_=sa.Text(), existing_nullable=False
+        "translation_logs",
+        "channel_id",
+        existing_type=sa.INTEGER(),
+        type_=sa.BigInteger(),
+        existing_nullable=True,
     )
     op.alter_column(
-        "translation_logs", "translated_text", existing_type=sa.VARCHAR(), type_=sa.Text(), existing_nullable=False
+        "translation_logs",
+        "original_text",
+        existing_type=sa.VARCHAR(),
+        type_=sa.Text(),
+        existing_nullable=False,
+    )
+    op.alter_column(
+        "translation_logs",
+        "translated_text",
+        existing_type=sa.VARCHAR(),
+        type_=sa.Text(),
+        existing_nullable=False,
     )
     op.alter_column(
         "translation_logs",
@@ -70,10 +129,28 @@ def upgrade() -> None:
         existing_nullable=False,
         existing_server_default=sa.text("now()"),
     )
-    op.drop_index("ix_translation_logs_created_at", table_name="translation_logs", postgresql_using="prefix")
-    op.create_index(op.f("ix_translation_logs_created_at"), "translation_logs", ["created_at"], unique=False)
-    op.drop_index("ix_translation_logs_user_id", table_name="translation_logs", postgresql_using="prefix")
-    op.create_index(op.f("ix_translation_logs_user_id"), "translation_logs", ["user_id"], unique=False)
+    op.drop_index(
+        "ix_translation_logs_created_at",
+        table_name="translation_logs",
+        postgresql_using="prefix",
+    )
+    op.create_index(
+        op.f("ix_translation_logs_created_at"),
+        "translation_logs",
+        ["created_at"],
+        unique=False,
+    )
+    op.drop_index(
+        "ix_translation_logs_user_id",
+        table_name="translation_logs",
+        postgresql_using="prefix",
+    )
+    op.create_index(
+        op.f("ix_translation_logs_user_id"),
+        "translation_logs",
+        ["user_id"],
+        unique=False,
+    )
     op.alter_column(
         "users",
         "id",
@@ -113,8 +190,18 @@ def downgrade() -> None:
         sa.Column("messages_sent", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("commands_used", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("last_translation_at", sa.TIMESTAMP(), nullable=True),
-        sa.Column("created_at", sa.TIMESTAMP(), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.TIMESTAMP(), nullable=False, server_default=sa.text("now()")),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.Index("ix_user_stats_user_id", "user_id", postgresql_using="prefix"),

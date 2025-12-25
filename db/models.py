@@ -34,6 +34,10 @@ class User(Base):
     # Relationships
     translation_logs: Mapped[List["TranslationLog"]] = relationship("TranslationLog", back_populates="user")
     player_lookups: Mapped[List["PlayerLookupLog"]] = relationship("PlayerLookupLog", back_populates="user")
+    gift_code_redemptions: Mapped[List["GiftCodeRedemption"]] = relationship(
+        "GiftCodeRedemption", back_populates="user"
+    )
+    registered_players: Mapped[List["RegisteredPlayer"]] = relationship("RegisteredPlayer", back_populates="added_by")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username})>"
@@ -46,7 +50,10 @@ class TranslationLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
@@ -75,7 +82,10 @@ class PlayerLookupLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
@@ -93,3 +103,62 @@ class PlayerLookupLog(Base):
 
     def __repr__(self) -> str:
         return f"<PlayerLookupLog(id={self.id}, user_id={self.user_id}, player_id={self.kingshot_id})>"
+
+
+class RegisteredPlayer(Base):
+    """Players registered for automatic gift code redemption."""
+
+    __tablename__ = "registered_players"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    player_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    added_by_user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    # Relationships
+    added_by: Mapped["User"] = relationship("User", back_populates="registered_players")
+
+    def __repr__(self) -> str:
+        return f"<RegisteredPlayer(id={self.id}, player_id={self.player_id}, player_name={self.player_name}, enabled={self.enabled})>"
+
+
+class GiftCodeRedemption(Base):
+    """Log of all gift code redemptions."""
+
+    __tablename__ = "gift_code_redemptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    player_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    gift_code: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    success: Mapped[bool] = mapped_column(default=False, nullable=False)
+    response_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="gift_code_redemptions")
+
+    def __repr__(self) -> str:
+        return f"<GiftCodeRedemption(id={self.id}, user_id={self.user_id}, player_id={self.player_id}, gift_code={self.gift_code})>"

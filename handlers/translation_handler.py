@@ -84,7 +84,11 @@ class TranslationHandler:
                     db = get_db()
                     async with db.session() as session:
                         await DatabaseService.get_or_create_user(
-                            session, ctx.author.id, ctx.author.name, ctx.author.discriminator, ctx.author.display_name
+                            session,
+                            ctx.author.id,
+                            ctx.author.name,
+                            ctx.author.discriminator,
+                            ctx.author.display_name,
                         )
                         await DatabaseService.log_translation(
                             session,
@@ -131,7 +135,11 @@ class TranslationHandler:
                     db = get_db()
                     async with db.session() as session:
                         await DatabaseService.get_or_create_user(
-                            session, ctx.author.id, ctx.author.name, ctx.author.discriminator, ctx.author.display_name
+                            session,
+                            ctx.author.id,
+                            ctx.author.name,
+                            ctx.author.discriminator,
+                            ctx.author.display_name,
                         )
                         await DatabaseService.log_translation(
                             session,
