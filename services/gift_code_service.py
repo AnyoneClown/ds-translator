@@ -44,7 +44,31 @@ class GiftCodeService(IGiftCodeService):
         """
         self._api_base_url = api_base_url
         self._endpoint = f"{api_base_url}/gift-codes/redeem"
+        self._session: Optional[aiohttp.ClientSession] = None
         logger.info(f"GiftCodeService initialized with endpoint: {self._endpoint}")
+
+    async def __aenter__(self):
+        """Enter async context manager - initialize shared session."""
+        self._session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context manager - cleanup session."""
+        if self._session:
+            await self._session.close()
+            self._session = None
+
+    async def ensure_session(self) -> aiohttp.ClientSession:
+        """Ensure session is initialized. Called if service is used without context manager."""
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self) -> None:
+        """Manually close the session if not using context manager."""
+        if self._session:
+            await self._session.close()
+            self._session = None
 
     async def check_already_redeemed(
         self, session: AsyncSession, player_id: int, gift_code: str
@@ -84,7 +108,7 @@ class GiftCodeService(IGiftCodeService):
             Set of player IDs (as strings) that have already redeemed this code
         """
         from sqlalchemy import or_
-        
+
         # Get successful redemptions OR failed redemptions with already-redeemed indicators
         result = await session.execute(
             select(GiftCodeRedemption.player_id)
@@ -131,70 +155,69 @@ class GiftCodeService(IGiftCodeService):
         payload = {"playerId": player_id, "giftCode": gift_code}
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self._endpoint,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    response_data = await response.json()
+            # Ensure session is available (supports both context manager and manual usage)
+            http_session = await self.ensure_session()
+            async with http_session.post(
+                self._endpoint,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                response_data = await response.json()
 
-                    if response.status == 200 and response_data.get("status") == "success":
-                        logger.info(f"Successfully redeemed gift code '{gift_code}' for player {player_id}")
-                        return {
-                            "success": True,
-                            "message": response_data.get("message", "Gift code redeemed successfully."),
-                            "data": response_data.get("data"),
-                            "timestamp": response_data.get("timestamp"),
-                        }
-                    else:
-                        # Handle error responses
-                        error_message = response_data.get("message", "Unknown error occurred")
-                        error_code = None
-                        error_details = None
+                if response.status == 200 and response_data.get("status") == "success":
+                    logger.info(f"Successfully redeemed gift code '{gift_code}' for player {player_id}")
+                    return {
+                        "success": True,
+                        "message": response_data.get("message", "Gift code redeemed successfully."),
+                        "data": response_data.get("data"),
+                        "timestamp": response_data.get("timestamp"),
+                    }
+                else:
+                    # Handle error responses
+                    error_message = response_data.get("message", "Unknown error occurred")
+                    error_code = None
+                    error_details = None
 
-                        if response_data.get("meta"):
-                            meta = response_data["meta"]
-                            error_code = meta.get("code")
-                            error_details = meta.get("details", {}).get("code")
+                    if response_data.get("meta"):
+                        meta = response_data["meta"]
+                        error_code = meta.get("code")
+                        error_details = meta.get("details", {}).get("code")
 
-                        # Check if the error indicates the code was already redeemed
-                        already_redeemed_phrases = [
-                            "already redeemed",
-                            "already been redeemed",
-                            "already used",
-                            "already claimed",
-                        ]
-                        is_already_redeemed = any(
-                            phrase in error_message.lower() for phrase in already_redeemed_phrases
+                    # Check if the error indicates the code was already redeemed
+                    already_redeemed_phrases = [
+                        "already redeemed",
+                        "already been redeemed",
+                        "already used",
+                        "already claimed",
+                    ]
+                    is_already_redeemed = any(phrase in error_message.lower() for phrase in already_redeemed_phrases)
+
+                    if is_already_redeemed:
+                        logger.info(
+                            f"Gift code '{gift_code}' was already redeemed for player {player_id} "
+                            f"(detected from API response)"
                         )
-
-                        if is_already_redeemed:
-                            logger.info(
-                                f"Gift code '{gift_code}' was already redeemed for player {player_id} "
-                                f"(detected from API response)"
-                            )
-                            return {
-                                "success": False,  # Log as failed
-                                "message": error_message,
-                                "error_code": "ALREADY_REDEEMED_BY_API",  # Special code to identify and skip next time
-                                "error_details": error_details,
-                                "timestamp": response_data.get("timestamp"),
-                                "already_redeemed_by_api": True,
-                            }
-
-                        logger.warning(
-                            f"Failed to redeem gift code '{gift_code}' for player {player_id}: "
-                            f"{error_message} (code: {error_code})"
-                        )
-
                         return {
-                            "success": False,
+                            "success": False,  # Log as failed
                             "message": error_message,
-                            "error_code": error_code,
+                            "error_code": "ALREADY_REDEEMED_BY_API",  # Special code to identify and skip next time
                             "error_details": error_details,
                             "timestamp": response_data.get("timestamp"),
+                            "already_redeemed_by_api": True,
                         }
+
+                    logger.warning(
+                        f"Failed to redeem gift code '{gift_code}' for player {player_id}: "
+                        f"{error_message} (code: {error_code})"
+                    )
+
+                    return {
+                        "success": False,
+                        "message": error_message,
+                        "error_code": error_code,
+                        "error_details": error_details,
+                        "timestamp": response_data.get("timestamp"),
+                    }
 
         except aiohttp.ClientError as e:
             logger.error(
