@@ -31,6 +31,11 @@ class IGiftCodeService(ABC):
         """Get set of player IDs who have already successfully redeemed this gift code."""
         pass
 
+    @abstractmethod
+    async def get_available_gift_codes(self) -> Dict[str, Any]:
+        """Get available gift codes from the API."""
+        pass
+
 
 class GiftCodeService(IGiftCodeService):
     """Service responsible for redeeming gift codes via external API."""
@@ -44,6 +49,7 @@ class GiftCodeService(IGiftCodeService):
         """
         self._api_base_url = api_base_url
         self._endpoint = f"{api_base_url}/gift-codes/redeem"
+        self._list_endpoint = f"{api_base_url}/gift-codes"
         self._session: Optional[aiohttp.ClientSession] = None
         logger.info(f"GiftCodeService initialized with endpoint: {self._endpoint}")
 
@@ -234,6 +240,58 @@ class GiftCodeService(IGiftCodeService):
                 f"Unexpected error redeeming gift code '{gift_code}' for player {player_id}: {e}",
                 exc_info=True,
             )
+            return {
+                "success": False,
+                "message": "An unexpected error occurred.",
+                "error_code": "UNEXPECTED_ERROR",
+            }
+
+    async def get_available_gift_codes(self) -> Dict[str, Any]:
+        """
+        Get available gift codes from the API.
+
+        Returns:
+            Dictionary containing the API response with gift codes list
+        """
+        logger.info(f"Fetching available gift codes from {self._list_endpoint}")
+
+        try:
+            # Ensure session is available
+            http_session = await self.ensure_session()
+            async with http_session.get(
+                self._list_endpoint,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                response_data = await response.json()
+
+                if response.status == 200 and response_data.get("status") == "success":
+                    logger.info(
+                        f"Successfully fetched gift codes: {response_data.get('data', {}).get('activeCount', 0)} active"
+                    )
+                    return {
+                        "success": True,
+                        "data": response_data.get("data"),
+                        "message": response_data.get("message", "Gift codes retrieved successfully"),
+                        "timestamp": response_data.get("timestamp"),
+                    }
+                else:
+                    error_message = response_data.get("message", "Failed to fetch gift codes")
+                    logger.warning(f"Failed to fetch gift codes: {error_message}")
+                    return {
+                        "success": False,
+                        "message": error_message,
+                        "status_code": response.status,
+                    }
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error fetching gift codes: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": "Network error occurred while fetching gift codes.",
+                "error_code": "NETWORK_ERROR",
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error fetching gift codes: {e}", exc_info=True)
             return {
                 "success": False,
                 "message": "An unexpected error occurred.",
