@@ -187,7 +187,7 @@ class GiftCodeService(IGiftCodeService):
                     if response_data.get("meta"):
                         meta = response_data["meta"]
                         error_code = meta.get("code")
-                        error_details = meta.get("details", {}).get("code")
+                        error_details = meta.get("details")
 
                     # Check if the error indicates the code was already redeemed
                     already_redeemed_phrases = [
