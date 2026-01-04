@@ -125,7 +125,7 @@ class TranslationHandler:
 
             result = self._translation_service.translate_to_english(text_to_translate)
 
-            if result and result.get("language") != "English":
+            if result and result.get("language").lower() not in ("english", "en"):
                 translated_text = result.get("text")
                 source_language = result.get("language")
                 await ctx.reply(f"Translated from {source_language}:\n> {translated_text}")

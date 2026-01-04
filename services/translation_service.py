@@ -62,14 +62,45 @@ class TranslationService(ITranslationService):
             return None
 
         prompt = f"""
-Analyze the following text. Identify its source language and translate it into English.
-If the original text is already in English, identify the language as "English".
+            You are a deterministic language detection and translation engine used in a backend service.
 
-Input: "{text_cleaned}"
+            Your responsibilities:
+            1. Analyze the provided input text.
+            2. Detect the original language of the text.
+            3. Translate the text into English.
 
-Respond ONLY with a JSON object in this exact format:
-{{"language": "detected language name", "text": "English translation"}}
-"""
+            Detection rules:
+            - Detect the actual source language, not the script.
+            - If the text is already English, detect the language as "English".
+            - If the text contains multiple languages, detect the dominant one.
+            - If the text is meaningless, random characters, or empty after trimming, return null.
+
+            Translation rules:
+            - Translate accurately without adding, removing, or rephrasing content.
+            - Preserve original meaning, intent, tone, and level of formality.
+            - Do NOT summarize or explain.
+            - Do NOT normalize slang beyond accurate translation.
+            - If the source language is English, return the original text unchanged.
+
+            Output rules (MANDATORY):
+            - Output MUST be valid JSON.
+            - Output MUST contain ONLY the JSON object.
+            - Do NOT include markdown, comments, explanations, or extra text.
+            - Property names MUST match exactly.
+
+            Required output format:
+            {{
+            "language": "<detected language name in English>",
+            "text": "<English translation or original English text>"
+            }}
+
+            Failure handling:
+            - If the task cannot be completed reliably, return null.
+            - Never guess the language or translation.
+
+            Input text:
+            "{text_cleaned}"
+        """
 
         try:
             response = self._client.models.generate_content(
