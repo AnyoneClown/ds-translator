@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, List
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from services.kvk_service import IKVKService
@@ -27,65 +28,53 @@ class KVKHandler:
     def register_commands(self):
         """Register all KVK commands with the bot."""
 
-        @self._bot.command(name="kvk")
-        async def get_kvk_matches(ctx, kingdom_number: str = None):
-            """Get KVK matches for a kingdom. Usage: !kvk {kingdom_number}"""
-            await self._handle_get_kvk_matches(ctx, kingdom_number)
+        @self._bot.tree.command(name="kvk", description="Get KVK matches for a kingdom")
+        @app_commands.describe(kingdom_number="The kingdom number to fetch matches for (e.g., 1, 2, 3)")
+        async def get_kvk_matches(interaction: discord.Interaction, kingdom_number: int):
+            """Get KVK matches for a kingdom."""
+            await self._handle_get_kvk_matches_slash(interaction, kingdom_number)
 
-    async def _handle_get_kvk_matches(self, ctx: commands.Context, kingdom_number: str = None):
+    async def _handle_get_kvk_matches_slash(self, interaction: discord.Interaction, kingdom_number: int):
         """
         Handle fetching KVK matches for a kingdom.
 
         Args:
-            ctx: Discord command context
+            interaction: Discord interaction
             kingdom_number: The kingdom number to fetch matches for
         """
-        user_info = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
-        guild_info = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DM"
+        await interaction.response.defer(thinking=True)
 
-        if not kingdom_number:
-            logger.info(f"KVK command called without kingdom number by {user_info} in {guild_info}")
-            await ctx.send(
-                "❌ Please provide a kingdom number.\n" "**Usage:** `!kvk {kingdom_number}`\n" "**Example:** `!kvk 1`"
-            )
+        user_info = f"{interaction.user.name}#{interaction.user.discriminator} (ID: {interaction.user.id})"
+        guild_info = f"{interaction.guild.name} (ID: {interaction.guild.id})" if interaction.guild else "DM"
+
+        if kingdom_number <= 0:
+            await interaction.followup.send("❌ Kingdom number must be a positive integer.")
             return
 
-        try:
-            kingdom_num = int(kingdom_number)
-            if kingdom_num <= 0:
-                await ctx.send("❌ Kingdom number must be a positive integer.")
-                return
-        except ValueError:
-            await ctx.send("❌ Invalid kingdom number. Please provide a valid integer.")
-            return
-
-        logger.info(f"KVK matches requested for kingdom {kingdom_num} by {user_info} in {guild_info}")
+        logger.info(f"KVK matches requested for kingdom {kingdom_number} by {user_info} in {guild_info}")
 
         try:
-            # Show loading message
-            loading_msg = await ctx.send(f"⚔️ Fetching KVK matches for Kingdom {kingdom_num}...\n⏳ Please wait...")
-
             # Fetch KVK matches from API
-            result = await self._kvk_service.get_kvk_matches(kingdom_num)
+            result = await self._kvk_service.get_kvk_matches(kingdom_number)
 
             if not result.get("success"):
-                await loading_msg.edit(
-                    content=f"❌ Failed to fetch KVK matches for Kingdom {kingdom_num}.\n"
+                await interaction.followup.send(
+                    f"❌ Failed to fetch KVK matches for Kingdom {kingdom_number}.\n"
                     f"**Error:** {result.get('message', 'Unknown error')}"
                 )
-                logger.warning(f"Failed to fetch KVK matches for kingdom {kingdom_num}: {result.get('message')}")
+                logger.warning(f"Failed to fetch KVK matches for kingdom {kingdom_number}: {result.get('message')}")
                 return
 
             matches = result.get("data", [])
             pagination = result.get("pagination", {})
 
             if not matches:
-                await loading_msg.edit(content=f"📭 No KVK matches found for Kingdom {kingdom_num}.")
+                await interaction.followup.send(f"📭 No KVK matches found for Kingdom {kingdom_number}.")
                 return
 
             # Create main embed
             embed = discord.Embed(
-                title=f"⚔️ KVK Matches - Kingdom {kingdom_num}",
+                title=f"⚔️ KVK Matches - Kingdom {kingdom_number}",
                 description=f"**Total Matches:** {pagination.get('total', len(matches))}",
                 color=discord.Color.red(),
             )
@@ -106,10 +95,10 @@ class KVKHandler:
                 season_date = match.get("season_date", "N/A")
 
                 # Determine opponent and roles
-                opponent = kingdom_b if kingdom_a == kingdom_num else kingdom_a
-                is_attacker = attacker == kingdom_num
-                is_castle_winner = castle_winner == kingdom_num
-                is_prep_winner = prep_winner == kingdom_num
+                opponent = kingdom_b if kingdom_a == kingdom_number else kingdom_a
+                is_attacker = attacker == kingdom_number
+                is_castle_winner = castle_winner == kingdom_number
+                is_prep_winner = prep_winner == kingdom_number
 
                 # Determine castle phase outcome
                 if is_castle_winner:
@@ -206,9 +195,9 @@ class KVKHandler:
                 text=f"Win Rate: {len(wins)}/{total} ({win_rate:.1f}%) | Data as of {result.get('timestamp', 'N/A')}"
             )
 
-            await loading_msg.edit(content=None, embed=embed)
-            logger.info(f"Successfully listed {len(matches)} KVK matches for kingdom {kingdom_num}")
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Successfully listed {len(matches)} KVK matches for kingdom {kingdom_number}")
 
         except Exception as e:
-            logger.error(f"Error fetching KVK matches for kingdom {kingdom_num}: {e}", exc_info=True)
-            await loading_msg.edit(content="❌ An error occurred while fetching KVK matches. Please try again later.")
+            logger.error(f"Error fetching KVK matches for kingdom {kingdom_number}: {e}", exc_info=True)
+            await interaction.followup.send("❌ An error occurred while fetching KVK matches. Please try again later.")

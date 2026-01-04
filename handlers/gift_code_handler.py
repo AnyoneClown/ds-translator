@@ -1,7 +1,9 @@
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from db import get_db
@@ -37,55 +39,52 @@ class GiftCodeHandler:
     def register_commands(self):
         """Register all gift code commands with the bot."""
 
-        @self._bot.command(name="redeem")
-        async def redeem_gift_code(ctx, gift_code: str = None):
-            """Redeem a gift code for all registered players. Usage: !redeem {gift_code}"""
-            await self._handle_redeem_gift_code(ctx, gift_code)
+        @self._bot.tree.command(name="redeem", description="Redeem a gift code for all registered players")
+        @app_commands.describe(gift_code="The gift code to redeem (e.g., KINGSHOTXMAS)")
+        async def redeem_gift_code(interaction: discord.Interaction, gift_code: str):
+            """Redeem a gift code for all registered players."""
+            await self._handle_redeem_gift_code_slash(interaction, gift_code)
 
-        @self._bot.command(name="giftcodes")
-        async def list_gift_codes(ctx):
-            """List all available gift codes. Usage: !giftcodes"""
-            await self._handle_list_gift_codes(ctx)
+        @self._bot.tree.command(name="giftcodes", description="List all available gift codes")
+        async def list_gift_codes(interaction: discord.Interaction):
+            """List all available gift codes."""
+            await self._handle_list_gift_codes_slash(interaction)
 
-        @self._bot.command(name="addplayer")
-        async def add_player(ctx, player_id: str = None):
-            """Add a player to gift code list using API name. Usage: !addplayer {player_id}"""
-            await self._handle_add_player(ctx, player_id)
+        @self._bot.tree.command(name="addplayer", description="Add a player to gift code redemption list")
+        @app_commands.describe(player_id="The player ID (API name) to add")
+        async def add_player(interaction: discord.Interaction, player_id: str):
+            """Add a player to gift code list using API name."""
+            await self._handle_add_player_slash(interaction, player_id)
 
-        @self._bot.command(name="removeplayer")
-        async def remove_player(ctx, player_id: str = None):
-            """Remove a player from gift code redemption list. Usage: !removeplayer {player_id}"""
-            await self._handle_remove_player(ctx, player_id)
+        @self._bot.tree.command(name="removeplayer", description="Remove a player from gift code redemption list")
+        @app_commands.describe(player_id="The player ID to remove")
+        async def remove_player(interaction: discord.Interaction, player_id: str):
+            """Remove a player from gift code redemption list."""
+            await self._handle_remove_player_slash(interaction, player_id)
 
-        @self._bot.command(name="listplayers")
-        async def list_players(ctx):
-            """List all registered players for gift code redemption. Usage: !listplayers"""
-            await self._handle_list_players(ctx)
+        @self._bot.tree.command(name="listplayers", description="List all registered players for gift code redemption")
+        async def list_players(interaction: discord.Interaction):
+            """List all registered players for gift code redemption."""
+            await self._handle_list_players_slash(interaction)
 
-        @self._bot.command(name="toggleplayer")
-        async def toggle_player(ctx, player_id: str = None):
-            """Enable/disable a player for gift code redemption. Usage: !toggleplayer {player_id}"""
-            await self._handle_toggle_player(ctx, player_id)
+        @self._bot.tree.command(name="toggleplayer", description="Enable/disable a player for gift code redemption")
+        @app_commands.describe(player_id="The player ID to toggle")
+        async def toggle_player(interaction: discord.Interaction, player_id: str):
+            """Enable/disable a player for gift code redemption."""
+            await self._handle_toggle_player_slash(interaction, player_id)
 
-    async def _handle_redeem_gift_code(self, ctx: commands.Context, gift_code: str = None):
+    async def _handle_redeem_gift_code_slash(self, interaction: discord.Interaction, gift_code: str):
         """
         Handle the redeem command for all registered players.
 
         Args:
-            ctx: Discord command context
+            interaction: Discord interaction
             gift_code: The gift code to redeem
         """
-        user_info = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
-        guild_info = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DM"
+        await interaction.response.defer(thinking=True)
 
-        if not gift_code:
-            logger.info(f"Redeem command called without gift code by {user_info} in {guild_info}")
-            await ctx.send(
-                "❌ Please provide a gift code.\n"
-                "**Usage:** `!redeem {gift_code}`\n"
-                "**Example:** `!redeem KINGSHOTXMAS`"
-            )
-            return
+        user_info = f"{interaction.user.name}#{interaction.user.discriminator} (ID: {interaction.user.id})"
+        guild_info = f"{interaction.guild.name} (ID: {interaction.guild.id})" if interaction.guild else "DM"
 
         logger.info(f"Bulk redeem command for code '{gift_code}' requested by {user_info} in {guild_info}")
 
@@ -95,23 +94,19 @@ class GiftCodeHandler:
             async with db.session() as session:
                 await DatabaseService.get_or_create_user(
                     session,
-                    ctx.author.id,
-                    ctx.author.name,
-                    ctx.author.discriminator,
-                    ctx.author.display_name,
+                    interaction.user.id,
+                    interaction.user.name,
+                    interaction.user.discriminator,
+                    interaction.user.display_name,
                 )
 
                 registered_players = await DatabaseService.get_registered_players(session, enabled_only=True)
 
                 if not registered_players:
-                    await ctx.send("❌ No registered players found. Use `!addplayer {player_id}` to add players first.")
+                    await interaction.followup.send(
+                        "❌ No registered players found. Use `/addplayer {player_id}` to add players first."
+                    )
                     return
-
-                # Send initial message
-                status_msg = await ctx.send(
-                    f"🎁 Redeeming gift code `{gift_code}` for {len(registered_players)} player(s)...\n"
-                    f"⏳ This may take a moment..."
-                )
 
                 # Get all players who have already redeemed this code (single DB query)
                 already_redeemed = await self._gift_code_service.get_redeemed_players(session, gift_code)
@@ -144,14 +139,14 @@ class GiftCodeHandler:
                         # Log to database
                         await DatabaseService.log_gift_code_redemption(
                             session,
-                            user_id=ctx.author.id,
+                            user_id=interaction.user.id,
                             player_id=player.player_id,
                             gift_code=gift_code,
                             success=result.get("success", False),
                             response_message=result.get("message"),
                             error_code=result.get("error_code"),
-                            guild_id=ctx.guild.id if ctx.guild else None,
-                            channel_id=ctx.channel.id,
+                            guild_id=interaction.guild.id if interaction.guild else None,
+                            channel_id=interaction.channel.id,
                         )
 
                         results.append(
@@ -188,34 +183,35 @@ class GiftCodeHandler:
                         )
 
                 # Format and send results
-                await self._send_redemption_results(ctx, status_msg, gift_code, results)
+                await self._send_redemption_results_slash(interaction, gift_code, results)
 
         except Exception as e:
             logger.error(f"Error in bulk redemption: {e}", exc_info=True)
-            await ctx.send("❌ An unexpected error occurred while processing the redemption. Please try again later.")
+            await interaction.followup.send(
+                "❌ An unexpected error occurred while processing the redemption. Please try again later."
+            )
 
-    async def _handle_list_gift_codes(self, ctx: commands.Context):
+    async def _handle_list_gift_codes_slash(self, interaction: discord.Interaction):
         """
         Handle listing all available gift codes.
 
         Args:
-            ctx: Discord command context
+            interaction: Discord interaction
         """
-        user_info = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
-        guild_info = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DM"
+        await interaction.response.defer(thinking=True)
+
+        user_info = f"{interaction.user.name}#{interaction.user.discriminator} (ID: {interaction.user.id})"
+        guild_info = f"{interaction.guild.name} (ID: {interaction.guild.id})" if interaction.guild else "DM"
 
         logger.info(f"List gift codes command requested by {user_info} in {guild_info}")
 
         try:
-            # Show loading message
-            loading_msg = await ctx.send("🎁 Fetching available gift codes...\n⏳ Please wait...")
-
             # Fetch gift codes from API
             result = await self._gift_code_service.get_available_gift_codes()
 
             if not result.get("success"):
-                await loading_msg.edit(
-                    content="❌ Failed to fetch gift codes from the API.\n"
+                await interaction.followup.send(
+                    "❌ Failed to fetch gift codes from the API.\n"
                     "Please try again later or contact an administrator."
                 )
                 logger.warning(f"Failed to fetch gift codes: {result.get('message')}")
@@ -228,12 +224,10 @@ class GiftCodeHandler:
             expired_count = data.get("expiredCount", 0)
 
             if not gift_codes:
-                await loading_msg.edit(content="📭 No gift codes available at the moment.")
+                await interaction.followup.send("📭 No gift codes available at the moment.")
                 return
 
             # Separate active and expired codes
-            from datetime import datetime, timezone
-
             active_codes = []
             expired_codes = []
 
@@ -302,19 +296,18 @@ class GiftCodeHandler:
                     inline=False,
                 )
 
-            embed.set_footer(text="Use !redeem {code} to redeem a gift code for all your registered players")
+            embed.set_footer(text="Use /redeem {code} to redeem a gift code for all your registered players")
 
-            await loading_msg.edit(content=None, embed=embed)
+            await interaction.followup.send(embed=embed)
             logger.info(f"Successfully listed {len(gift_codes)} gift codes for {user_info}")
 
         except Exception as e:
             logger.error(f"Error listing gift codes: {e}", exc_info=True)
-            await loading_msg.edit(content="❌ An error occurred while fetching gift codes. Please try again later.")
+            await interaction.followup.send("❌ An error occurred while fetching gift codes. Please try again later.")
 
-    async def _send_redemption_results(
+    async def _send_redemption_results_slash(
         self,
-        ctx: commands.Context,
-        status_msg: discord.Message,
+        interaction: discord.Interaction,
         gift_code: str,
         results: List[Dict],
     ):
@@ -373,18 +366,12 @@ class GiftCodeHandler:
 
         embed.set_footer(text="🎮 Check in-game mail for successfully redeemed codes!")
 
-        await status_msg.edit(content=None, embed=embed)
+        await interaction.followup.send(embed=embed)
         logger.info(f"Bulk redemption completed: {success_count} successful, {failed_count} failed")
 
-    async def _handle_add_player(self, ctx: commands.Context, player_id: str = None):
+    async def _handle_add_player_slash(self, interaction: discord.Interaction, player_id: str):
         """Handle adding a player to the redemption list."""
-        if not player_id:
-            await ctx.send(
-                "❌ Please provide a player ID.\n"
-                "**Usage:** `!addplayer {player_id}`\n"
-                "**Example:** `!addplayer 123670746`"
-            )
-            return
+        await interaction.response.defer(thinking=True)
 
         try:
             # Validate player exists via PlayerInfoService
@@ -398,7 +385,7 @@ class GiftCodeHandler:
                     ),
                     color=discord.Color.red(),
                 )
-                await ctx.send(embed=embed)
+                await interaction.followup.send(embed=embed)
                 logger.warning(f"Attempt to add non-existent player ID {player_id}")
                 return
 
@@ -406,10 +393,10 @@ class GiftCodeHandler:
             async with db.session() as session:
                 await DatabaseService.get_or_create_user(
                     session,
-                    ctx.author.id,
-                    ctx.author.name,
-                    ctx.author.discriminator,
-                    ctx.author.display_name,
+                    interaction.user.id,
+                    interaction.user.name,
+                    interaction.user.discriminator,
+                    interaction.user.display_name,
                 )
 
                 # Use API-provided name only
@@ -418,7 +405,7 @@ class GiftCodeHandler:
                 await DatabaseService.add_registered_player(
                     session,
                     player_id=player_id,
-                    added_by_user_id=ctx.author.id,
+                    added_by_user_id=interaction.user.id,
                     player_name=resolved_name,
                     enabled=True,
                 )
@@ -433,18 +420,16 @@ class GiftCodeHandler:
                     embed.add_field(name="Player Name", value=resolved_name, inline=True)
                 embed.add_field(name="Status", value="✅ Enabled", inline=True)
 
-                await ctx.send(embed=embed)
-                logger.info(f"Player {player_id} added by {ctx.author.id}")
+                await interaction.followup.send(embed=embed)
+                logger.info(f"Player {player_id} added by {interaction.user.id}")
 
         except Exception as e:
             logger.error(f"Error adding player {player_id}: {e}", exc_info=True)
-            await ctx.send("❌ An error occurred while adding the player.")
+            await interaction.followup.send("❌ An error occurred while adding the player.")
 
-    async def _handle_remove_player(self, ctx: commands.Context, player_id: str = None):
+    async def _handle_remove_player_slash(self, interaction: discord.Interaction, player_id: str):
         """Handle removing a player from the redemption list."""
-        if not player_id:
-            await ctx.send("❌ Please provide a player ID.\n" "**Usage:** `!removeplayer {player_id}`")
-            return
+        await interaction.response.defer(thinking=True)
 
         try:
             db = get_db()
@@ -453,17 +438,19 @@ class GiftCodeHandler:
                 player = await DatabaseService.get_registered_player(session, player_id)
 
                 if not player:
-                    await ctx.send(f"❌ Player `{player_id}` not found in the redemption list.")
+                    await interaction.followup.send(f"❌ Player `{player_id}` not found in the redemption list.")
                     return
 
                 # Determine admin status (guild context only)
                 is_admin = False
-                if ctx.guild and ctx.author.guild_permissions:
-                    is_admin = bool(ctx.author.guild_permissions.administrator)
+                if interaction.guild and interaction.user.guild_permissions:
+                    is_admin = bool(interaction.user.guild_permissions.administrator)
 
                 # Check ownership or admin rights
-                if player.added_by_user_id != ctx.author.id and not is_admin:
-                    await ctx.send("⛔ You can only remove players that you added, or you must be an admin.")
+                if player.added_by_user_id != interaction.user.id and not is_admin:
+                    await interaction.followup.send(
+                        "⛔ You can only remove players that you added, or you must be an admin."
+                    )
                     return
 
                 # Proceed with removal
@@ -475,24 +462,26 @@ class GiftCodeHandler:
                         description=f"Player `{player_id}` has been removed from the gift code redemption list.",
                         color=discord.Color.green(),
                     )
-                    await ctx.send(embed=embed)
-                    logger.info(f"Player {player_id} removed by {ctx.author.id} (admin={is_admin})")
+                    await interaction.followup.send(embed=embed)
+                    logger.info(f"Player {player_id} removed by {interaction.user.id} (admin={is_admin})")
                 else:
-                    await ctx.send(f"❌ Player `{player_id}` not found in the redemption list.")
+                    await interaction.followup.send(f"❌ Player `{player_id}` not found in the redemption list.")
 
         except Exception as e:
             logger.error(f"Error removing player {player_id}: {e}", exc_info=True)
-            await ctx.send("❌ An error occurred while removing the player.")
+            await interaction.followup.send("❌ An error occurred while removing the player.")
 
-    async def _handle_list_players(self, ctx: commands.Context):
+    async def _handle_list_players_slash(self, interaction: discord.Interaction):
         """Handle listing all registered players."""
+        await interaction.response.defer(thinking=True)
+
         try:
             db = get_db()
             async with db.session() as session:
-                all_players = await DatabaseService.get_registered_players(session, enabled_only=True)
+                all_players = await DatabaseService.get_registered_players(session, enabled_only=False)
 
                 if not all_players:
-                    await ctx.send("📋 No players registered for gift code redemption.")
+                    await interaction.followup.send("📋 No players registered for gift code redemption.")
                     return
 
                 enabled_players = [p for p in all_players if p.enabled]
@@ -530,17 +519,15 @@ class GiftCodeHandler:
                         disabled_str += f"\n*... and {len(disabled_players) - 10} more*"
                     embed.add_field(name="⛔ Disabled", value=disabled_str, inline=False)
 
-                await ctx.send(embed=embed)
+                await interaction.followup.send(embed=embed)
 
         except Exception as e:
             logger.error(f"Error listing players: {e}", exc_info=True)
-            await ctx.send("❌ An error occurred while retrieving the player list.")
+            await interaction.followup.send("❌ An error occurred while retrieving the player list.")
 
-    async def _handle_toggle_player(self, ctx: commands.Context, player_id: str = None):
+    async def _handle_toggle_player_slash(self, interaction: discord.Interaction, player_id: str):
         """Handle toggling a player's enabled status."""
-        if not player_id:
-            await ctx.send("❌ Please provide a player ID.\n" "**Usage:** `!toggleplayer {player_id}`")
-            return
+        await interaction.response.defer(thinking=True)
 
         try:
             db = get_db()
@@ -556,11 +543,11 @@ class GiftCodeHandler:
                         description=f"Player `{player_id}` has been **{status_text}** for gift code redemption.",
                         color=(discord.Color.green() if new_status else discord.Color.orange()),
                     )
-                    await ctx.send(embed=embed)
-                    logger.info(f"Player {player_id} toggled to {status_text} by {ctx.author.id}")
+                    await interaction.followup.send(embed=embed)
+                    logger.info(f"Player {player_id} toggled to {status_text} by {interaction.user.id}")
                 else:
-                    await ctx.send(f"❌ Player `{player_id}` not found in the redemption list.")
+                    await interaction.followup.send(f"❌ Player `{player_id}` not found in the redemption list.")
 
         except Exception as e:
             logger.error(f"Error toggling player {player_id}: {e}", exc_info=True)
-            await ctx.send("❌ An error occurred while updating the player status.")
+            await interaction.followup.send("❌ An error occurred while updating the player status.")

@@ -1,6 +1,7 @@
 import logging
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from db import get_db
@@ -28,31 +29,26 @@ class PlayerInfoHandler:
     def register_commands(self):
         """Register all player info commands with the bot."""
 
-        @self._bot.command(name="stats")
-        async def get_player_stats(ctx, player_id: str = None):
-            """Fetch and display player statistics. Usage: !stats {player_id}"""
-            await self._handle_player_stats(ctx, player_id)
+        @self._bot.tree.command(name="stats", description="Fetch and display player statistics")
+        @app_commands.describe(player_id="The player ID to look up")
+        async def get_player_stats(interaction: discord.Interaction, player_id: str):
+            """Fetch and display player statistics."""
+            await self._handle_player_stats_slash(interaction, player_id)
 
-    async def _handle_player_stats(self, ctx: commands.Context, player_id: str = None):
+    async def _handle_player_stats_slash(self, interaction: discord.Interaction, player_id: str):
         """
-        Handle the stats command.
+        Handle the stats command (slash command).
 
         Args:
-            ctx: Discord command context
+            interaction: Discord interaction
             player_id: The player ID to look up
         """
-        user_info = f"{ctx.author.name}#{ctx.author.discriminator} (ID: {ctx.author.id})"
-        guild_info = f"{ctx.guild.name} (ID: {ctx.guild.id})" if ctx.guild else "DM"
+        await interaction.response.defer(thinking=True)
 
-        if not player_id:
-            logger.info(f"Stats command called without player_id by {user_info} in {guild_info}")
-            await ctx.send("❌ Please provide a player ID. Usage: `!stats {player_id}`")
-            return
+        user_info = f"{interaction.user.name}#{interaction.user.discriminator} (ID: {interaction.user.id})"
+        guild_info = f"{interaction.guild.name} (ID: {interaction.guild.id})" if interaction.guild else "DM"
 
         logger.info(f"Stats command for player {player_id} requested by {user_info} in {guild_info}")
-
-        # Send a loading message
-        loading_msg = await ctx.send(f"🔍 Fetching stats for player `{player_id}`...")
 
         try:
             # Fetch player info
@@ -60,7 +56,7 @@ class PlayerInfoHandler:
 
             if player_data is None:
                 logger.warning(f"Player {player_id} not found for request by {user_info}")
-                await loading_msg.edit(content=f"❌ Could not find player with ID: `{player_id}`")
+                await interaction.followup.send(f"❌ Could not find player with ID: `{player_id}`")
 
                 # Track failed lookup in database
                 try:
@@ -68,18 +64,18 @@ class PlayerInfoHandler:
                     async with db.session() as session:
                         await DatabaseService.get_or_create_user(
                             session,
-                            ctx.author.id,
-                            ctx.author.name,
-                            ctx.author.discriminator,
-                            ctx.author.display_name,
+                            interaction.user.id,
+                            interaction.user.name,
+                            interaction.user.discriminator,
+                            interaction.user.display_name,
                         )
                         await DatabaseService.log_player_lookup(
                             session,
-                            user_id=ctx.author.id,
+                            user_id=interaction.user.id,
                             player_id=player_id,
                             success=False,
-                            guild_id=ctx.guild.id if ctx.guild else None,
-                            channel_id=ctx.channel.id,
+                            guild_id=interaction.guild_id,
+                            channel_id=interaction.channel_id,
                         )
                 except Exception as db_error:
                     logger.error(f"Database tracking error: {db_error}", exc_info=True)
@@ -105,7 +101,7 @@ class PlayerInfoHandler:
 
             embed.set_footer(text="Data from kingshot.net API")
 
-            await loading_msg.edit(content=None, embed=embed)
+            await interaction.followup.send(embed=embed)
             logger.info(f"Successfully displayed stats for {player_name} (ID: {player_id}) to {user_info}")
 
             # Track in database
@@ -115,24 +111,24 @@ class PlayerInfoHandler:
                     # Get or create user
                     await DatabaseService.get_or_create_user(
                         session,
-                        ctx.author.id,
-                        ctx.author.name,
-                        ctx.author.discriminator,
-                        ctx.author.display_name,
+                        interaction.user.id,
+                        interaction.user.name,
+                        interaction.user.discriminator,
+                        interaction.user.display_name,
                     )
                     # Log the successful player lookup with kingdom and castle level
                     await DatabaseService.log_player_lookup(
                         session,
-                        user_id=ctx.author.id,
+                        user_id=interaction.user.id,
                         player_id=player_id,
                         player_name=player_name,
                         kingdom=(str(player_data.get("kingdom")) if player_data.get("kingdom") else None),
                         castle_level=player_data.get("levelRenderedDetailed"),
                         success=True,
-                        guild_id=ctx.guild.id if ctx.guild else None,
-                        channel_id=ctx.channel.id,
+                        guild_id=interaction.guild_id,
+                        channel_id=interaction.channel_id,
                     )
-                    logger.debug(f"Tracked player stats request by user {ctx.author.id}")
+                    logger.debug(f"Tracked player stats request by user {interaction.user.id}")
             except Exception as db_error:
                 logger.error(f"Database tracking error: {db_error}", exc_info=True)
 
@@ -141,4 +137,4 @@ class PlayerInfoHandler:
                 f"Error handling stats command for player {player_id} by {user_info}: {e}",
                 exc_info=True,
             )
-            await loading_msg.edit(content=f"❌ An error occurred while fetching player stats: {str(e)}")
+            await interaction.followup.send(f"❌ An error occurred while fetching player stats: {str(e)}")

@@ -91,6 +91,16 @@ class TranslatorBot:
             except Exception as e:
                 logger.error(f"❌ Database connection failed: {e}")
 
+            # Sync slash commands
+            try:
+                logger.info("Syncing slash commands...")
+                synced = await self.bot.tree.sync()
+                logger.info(f"✅ Synced {len(synced)} slash command(s)")
+                for cmd in synced:
+                    logger.info(f"  - /{cmd.name}")
+            except Exception as e:
+                logger.error(f"❌ Failed to sync slash commands: {e}")
+
             self.event_handler.start_scheduler_task()
             logger.info("Event scheduler task started")
 

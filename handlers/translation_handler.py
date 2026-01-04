@@ -106,7 +106,7 @@ class TranslationHandler:
             else:
                 await ctx.reply(f"Sorry, I couldn't translate that to {target_language}.")
         except Exception as e:
-            print(f"Error in translate command: {e}")
+            logger.error(f"Error in translate command: {e}")
             await ctx.reply("An error occurred while processing your request.")
 
     async def _handle_translate_to_english(self, ctx):
@@ -159,8 +159,16 @@ class TranslationHandler:
             else:
                 await ctx.reply("Sorry, I couldn't translate that.")
         except Exception as e:
-            print(f"Error in !en command: {e}")
+            logger.error(f"Error in !en command: {e}")
             await ctx.reply("An error occurred while translating.")
+
+    async def _handle_command_error(self, ctx, error):
+        """Handle errors for translation commands."""
+        if isinstance(error, commands.MissingRole):
+            await ctx.reply("You do not have the required 'Translator' role to use this command.")
+        else:
+            logger.error(f"Unhandled error in command: {error}")
+            await ctx.reply("An unexpected error occurred.")
 
     async def _handle_auto_translation(self, message: discord.Message):
         """Automatically translate messages from users with Translator role."""
@@ -208,12 +216,4 @@ class TranslationHandler:
                     logger.error(f"Database tracking error: {db_error}", exc_info=True)
         except Exception as e:
             logger.error(f"Auto-translation error: {e}", exc_info=True)
-            await message.channel.send("Sorry, I couldn't translate that.")
-
-    async def _handle_command_error(self, ctx, error):
-        """Handle errors for translation commands."""
-        if isinstance(error, commands.MissingRole):
-            await ctx.reply("You do not have the required 'Translator' role to use this command.")
-        else:
-            print(f"Unhandled error in command: {error}")
-            await ctx.reply("An unexpected error occurred.")
+            # Don't send error messages for auto-translation to avoid spam
