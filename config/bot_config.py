@@ -12,6 +12,7 @@ class BotConfig:
 
     discord_token: str
     database_url: str
+    ocr_api_key: str
     command_prefix: str = "!"
     translator_role_name: str = "Translator"
 
@@ -28,9 +29,14 @@ class BotConfig:
         if not database_url:
             raise ValueError("COCKROACHDB_URL not found in environment variables")
 
+        ocr_api_key = os.getenv("KOLOSAL_OCR_API_KEY")
+        if not ocr_api_key:
+            raise ValueError("KOLOSAL_OCR_API_KEY not found in environment variables")
+
         return cls(
             discord_token=discord_token,
             database_url=database_url,
+            ocr_api_key=ocr_api_key,
             command_prefix=os.getenv("COMMAND_PREFIX", "!"),
             translator_role_name=os.getenv("TRANSLATOR_ROLE", "Translator"),
         )

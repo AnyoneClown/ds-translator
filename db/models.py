@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, JSON, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -38,6 +38,7 @@ class User(Base):
         "GiftCodeRedemption", back_populates="user"
     )
     registered_players: Mapped[List["RegisteredPlayer"]] = relationship("RegisteredPlayer", back_populates="added_by")
+    ocr_requests: Mapped[List["OCRRequest"]] = relationship("OCRRequest", back_populates="user")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username})>"
@@ -162,3 +163,64 @@ class GiftCodeRedemption(Base):
 
     def __repr__(self) -> str:
         return f"<GiftCodeRedemption(id={self.id}, user_id={self.user_id}, player_id={self.player_id}, gift_code={self.gift_code})>"
+
+
+class OCRRequest(Base):
+    """Log of all OCR requests made by users."""
+
+    __tablename__ = "ocr_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    ocr_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    success: Mapped[bool] = mapped_column(default=True, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="ocr_requests")
+    ocr_results: Mapped[List["OCRResult"]] = relationship(
+        "OCRResult", back_populates="ocr_request", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCRRequest(id={self.id}, user_id={self.user_id}, ocr_type={self.ocr_type}, image_count={self.image_count})>"
+
+
+class OCRResult(Base):
+    """Individual OCR results for each image processed."""
+
+    __tablename__ = "ocr_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ocr_request_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("ocr_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    image_index: Mapped[int] = mapped_column(Integer, nullable=False)  # Order of image in batch
+    extracted_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Structured JSON data
+    raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Raw extracted text
+    confidence_score: Mapped[Optional[float]] = mapped_column(nullable=True)
+    success: Mapped[bool] = mapped_column(default=True, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # Relationships
+    ocr_request: Mapped["OCRRequest"] = relationship("OCRRequest", back_populates="ocr_results")
+
+    def __repr__(self) -> str:
+        return f"<OCRResult(id={self.id}, ocr_request_id={self.ocr_request_id}, image_index={self.image_index}, success={self.success})>"

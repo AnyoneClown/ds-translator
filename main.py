@@ -13,8 +13,8 @@ from google import genai
 from config import BotConfig
 from config.logging_config import setup_logging
 from db import init_db
-from handlers import DatabaseHandler, EventHandler, GiftCodeHandler, KVKHandler, PlayerInfoHandler, TranslationHandler
-from services import EventSchedulerService, GiftCodeService, KVKService, PlayerInfoService, TranslationService
+from handlers import DatabaseHandler, EventHandler, GiftCodeHandler, KVKHandler, OCRHandler, PlayerInfoHandler, TranslationHandler
+from services import EventSchedulerService, GiftCodeService, KVKService, OCRService, PlayerInfoService, TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class TranslatorBot:
         self.player_info_service = PlayerInfoService()
         self.gift_code_service = GiftCodeService()
         self.kvk_service = KVKService()
+        self.ocr_service = OCRService(config.ocr_api_key)
         logger.info("All services initialized")
 
         # Initialize handlers
@@ -61,6 +62,7 @@ class TranslatorBot:
         self.player_info_handler = PlayerInfoHandler(self.player_info_service, self.bot)
         self.gift_code_handler = GiftCodeHandler(self.gift_code_service, self.player_info_service, self.bot)
         self.kvk_handler = KVKHandler(self.kvk_service, self.bot)
+        self.ocr_handler = OCRHandler(self.ocr_service, self.bot)
         self.database_handler = DatabaseHandler(self.bot)
         logger.info("All handlers initialized")
 
@@ -141,6 +143,7 @@ class TranslatorBot:
         self.player_info_handler.register_commands()
         self.gift_code_handler.register_commands()
         self.kvk_handler.register_commands()
+        self.ocr_handler.register_commands()
         self.database_handler.register_commands()
         self.database_handler.register_events()
         logger.info("All command handlers registered")
