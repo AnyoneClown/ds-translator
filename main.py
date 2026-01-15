@@ -57,7 +57,7 @@ class TranslatorBot:
 
         # Initialize handlers
         logger.info("Initializing handlers...")
-        self.translation_handler = TranslationHandler(self.translation_service, self.bot)
+        self.translation_handler = TranslationHandler(self.translation_service, self.bot, config)
         self.event_handler = EventHandler(self.event_scheduler_service, self.bot)
         self.player_info_handler = PlayerInfoHandler(self.player_info_service, self.bot)
         self.gift_code_handler = GiftCodeHandler(self.gift_code_service, self.player_info_service, self.bot)

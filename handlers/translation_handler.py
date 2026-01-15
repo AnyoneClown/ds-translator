@@ -13,16 +13,18 @@ logger = logging.getLogger(__name__)
 class TranslationHandler:
     """Handles translation-related Discord commands and events."""
 
-    def __init__(self, translation_service: ITranslationService, bot: commands.Bot):
+    def __init__(self, translation_service: ITranslationService, bot: commands.Bot, config=None):
         """
         Initialize translation handler.
 
         Args:
             translation_service: Service for handling translations
             bot: Discord bot instance
+            config: Bot configuration containing banned players list
         """
         self._translation_service = translation_service
         self._bot = bot
+        self._config = config
 
     def register_commands(self):
         """Register all translation commands with the bot."""
@@ -176,6 +178,11 @@ class TranslationHandler:
         role = discord.utils.get(message.guild.roles, name=role_name)
 
         if not (role and role in message.author.roles):
+            return
+
+        # Check if user is banned from auto-translation
+        if self._config and message.author.id in self._config.banned_players:
+            logger.debug(f"User {message.author.id} is banned from auto-translation")
             return
 
         # Skip empty or command-like messages
