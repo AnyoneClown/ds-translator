@@ -62,6 +62,11 @@ class TranslationHandler:
 
     async def _handle_translate_to_language(self, ctx, target_language: str):
         """Handle translation to a specific language command."""
+        # Check if user is banned from translation
+        if self._config and ctx.author.id in self._config.banned_players:
+            await ctx.reply("You are banned from using translation commands.")
+            return
+
         if not ctx.message.reference:
             await ctx.reply("You need to reply to a message to use this command.")
             return
@@ -113,6 +118,11 @@ class TranslationHandler:
 
     async def _handle_translate_to_english(self, ctx):
         """Handle translation to English command."""
+        # Check if user is banned from translation
+        if self._config and ctx.author.id in self._config.banned_players:
+            await ctx.reply("You are banned from using translation commands.")
+            return
+
         if not ctx.message.reference:
             await ctx.reply("You need to reply to a message to use this command.")
             return
