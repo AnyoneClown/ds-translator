@@ -4,6 +4,8 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
+from services.kingshot_api import KingshotAPIClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,16 +21,11 @@ class IPlayerInfoService(ABC):
 class PlayerInfoService(IPlayerInfoService):
     """Service responsible for fetching player information from external API."""
 
-    def __init__(self, api_base_url: str = "https://kingshot.net/api"):
+    def __init__(self):
         """
         Initialize player info service.
-
-        Args:
-            api_base_url: Base URL for the player info API
         """
-        self._api_base_url = api_base_url
-        self._endpoint = f"{api_base_url}/player-info"
-        logger.info(f"PlayerInfoService initialized with endpoint: {self._endpoint}")
+        logger.info("PlayerInfoService initialized using original Kingshot API")
 
     async def get_player_info(self, player_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -42,35 +39,34 @@ class PlayerInfoService(IPlayerInfoService):
         """
         logger.info(f"Fetching player info for ID: {player_id}")
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self._endpoint,
-                    params={"playerId": player_id},
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status == 200:
-                        response = await response.json()
-                        player_data = response.get("data")
-                        if player_data:
-                            logger.info(
-                                f"Successfully fetched player info for ID {player_id}: "
-                                f"{player_data.get('name', 'Unknown')} (Kingdom {player_data.get('kingdom', 'N/A')})"
-                            )
-                        else:
-                            logger.warning(f"API returned 200 but no data for player ID: {player_id}")
-                        return player_data
-                    elif response.status == 404:
-                        logger.warning(f"Player not found: {player_id}")
-                        return None
+            async with KingshotAPIClient() as client:
+                response = await client.get_player(player_id)
+                # Success response should have code 0
+                if response.get("code") == 0:
+                    raw_data = response.get("data", {})
+                    if raw_data:
+                        # Normalize to old format to minimize handler changes
+                        player_data = {
+                            "name": raw_data.get("nickname"),
+                            "playerId": str(raw_data.get("fid", player_id)),
+                            "level": raw_data.get("stove_lv"),
+                            "kingdom": raw_data.get("kid"),
+                            "profilePhoto": raw_data.get("avatar_image")
+                        }
+                        logger.info(
+                            f"Successfully fetched player info for ID {player_id}: "
+                            f"{player_data.get('name', 'Unknown')} (Kingdom {player_data.get('kingdom', 'N/A')})"
+                        )
                     else:
-                        logger.error(f"API error for player {player_id}: Status {response.status}")
-                        return None
-        except aiohttp.ClientError as e:
-            logger.error(
-                f"Network error fetching player info for {player_id}: {e}",
-                exc_info=True,
-            )
-            return None
+                        player_data = {}
+                        logger.warning(f"API returned code 0 but no data for player ID: {player_id}")
+                    return player_data
+                elif response.get("err_code") == 40004 or "not exist" in str(response.get("msg", "")).lower():
+                    logger.warning(f"Player not found: {player_id}")
+                    return None
+                else:
+                    logger.error(f"API error for player {player_id}: {response}")
+                    return None
         except Exception as e:
             logger.error(
                 f"Unexpected error fetching player info for {player_id}: {e}",

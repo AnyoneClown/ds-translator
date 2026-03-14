@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import GiftCodeRedemption
 
+from services.kingshot_api import KingshotAPIClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,41 +42,37 @@ class IGiftCodeService(ABC):
 class GiftCodeService(IGiftCodeService):
     """Service responsible for redeeming gift codes via external API."""
 
-    def __init__(self, api_base_url: str = "https://kingshot.net/api"):
+    def __init__(self):
         """
         Initialize gift code service.
-
-        Args:
-            api_base_url: Base URL for the gift code API
         """
-        self._api_base_url = api_base_url
-        self._endpoint = f"{api_base_url}/gift-codes/redeem"
-        self._list_endpoint = f"{api_base_url}/gift-codes"
-        self._session: Optional[aiohttp.ClientSession] = None
-        logger.info(f"GiftCodeService initialized with endpoint: {self._endpoint}")
+        self._client: Optional[KingshotAPIClient] = None
+        logger.info("GiftCodeService initialized using original Kingshot API")
 
     async def __aenter__(self):
-        """Enter async context manager - initialize shared session."""
-        self._session = aiohttp.ClientSession()
+        """Enter async context manager - initialize shared client."""
+        client = KingshotAPIClient()
+        self._client = client
+        await client.ensure_session()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Exit async context manager - cleanup session."""
-        if self._session:
-            await self._session.close()
-            self._session = None
+        """Exit async context manager - cleanup client."""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
-    async def ensure_session(self) -> aiohttp.ClientSession:
-        """Ensure session is initialized. Called if service is used without context manager."""
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
-        return self._session
+    async def ensure_client(self) -> KingshotAPIClient:
+        """Ensure client is initialized. Called if service is used without context manager."""
+        if self._client is None:
+            self._client = KingshotAPIClient()
+        return self._client
 
     async def close(self) -> None:
-        """Manually close the session if not using context manager."""
-        if self._session:
-            await self._session.close()
-            self._session = None
+        """Manually close the client if not using context manager."""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
     async def check_already_redeemed(
         self, session: AsyncSession, player_id: int, gift_code: str
@@ -161,79 +159,71 @@ class GiftCodeService(IGiftCodeService):
         payload = {"playerId": player_id, "giftCode": gift_code}
 
         try:
-            # Ensure session is available (supports both context manager and manual usage)
-            http_session = await self.ensure_session()
-            async with http_session.post(
-                self._endpoint,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
-                response_data = await response.json()
+            # Ensure client is available 
+            api_client = await self.ensure_client()
+            response_data = await api_client.redeem_code(str(player_id), gift_code)
 
-                if response.status == 200 and response_data.get("status") == "success":
-                    logger.info(f"Successfully redeemed gift code '{gift_code}' for player {player_id}")
-                    return {
-                        "success": True,
-                        "message": response_data.get("message", "Gift code redeemed successfully."),
-                        "data": response_data.get("data"),
-                        "timestamp": response_data.get("timestamp"),
-                    }
-                else:
-                    # Handle error responses
-                    error_message = response_data.get("message", "Unknown error occurred")
-                    error_code = None
-                    error_details = None
+            code = response_data.get("code")
+            msg = response_data.get("msg", "Unknown error occurred")
 
-                    if response_data.get("meta"):
-                        meta = response_data["meta"]
-                        error_code = meta.get("code")
-                        error_details = meta.get("details")
+            if code == 0:
+                logger.info(f"Successfully redeemed gift code '{gift_code}' for player {player_id}")
+                return {
+                    "success": True,
+                    "message": msg,
+                    "data": response_data.get("data"),
+                }
+            else:
+                err_code = response_data.get("err_code")
+                
+                # Check if the error indicates the code was already redeemed
+                already_redeemed_phrases = [
+                    "already redeemed",
+                    "already been redeemed",
+                    "already used",
+                    "already claimed",
+                    "exceeded the limit",
+                    "have already received",
+                    "collected",
+                    "same type exchange",
+                    "time error",
+                ]
+                is_already_redeemed = any(phrase in msg.lower() for phrase in already_redeemed_phrases)
 
-                    # Check if the error indicates the code was already redeemed
-                    already_redeemed_phrases = [
-                        "already redeemed",
-                        "already been redeemed",
-                        "already used",
-                        "already claimed",
-                    ]
-                    is_already_redeemed = any(phrase in error_message.lower() for phrase in already_redeemed_phrases)
-
-                    if is_already_redeemed:
-                        logger.info(
-                            f"Gift code '{gift_code}' was already redeemed for player {player_id} "
-                            f"(detected from API response)"
-                        )
-                        return {
-                            "success": False,  # Log as failed
-                            "message": error_message,
-                            "error_code": "ALREADY_REDEEMED_BY_API",  # Special code to identify and skip next time
-                            "error_details": error_details,
-                            "timestamp": response_data.get("timestamp"),
-                            "already_redeemed_by_api": True,
-                        }
-
-                    logger.warning(
-                        f"Failed to redeem gift code '{gift_code}' for player {player_id}: "
-                        f"{error_message} (code: {error_code})"
+                if is_already_redeemed:
+                    logger.info(
+                        f"Gift code '{gift_code}' was already redeemed for player {player_id} "
+                        f"(detected from API response)"
                     )
-
                     return {
-                        "success": False,
-                        "message": error_message,
-                        "error_code": error_code,
-                        "error_details": error_details,
-                        "timestamp": response_data.get("timestamp"),
+                        "success": False,  # Log as failed
+                        "message": msg,
+                        "error_code": "ALREADY_REDEEMED_BY_API",  # Special code to identify and skip next time
+                        "error_details": {"err_code": err_code},
+                        "already_redeemed_by_api": True,
                     }
 
-        except aiohttp.ClientError as e:
+                logger.warning(
+                    f"Failed to redeem gift code '{gift_code}' for player {player_id}: "
+                    f"{msg} (code: {err_code})"
+                )
+
+                return {
+                    "success": False,
+                    "message": msg,
+                    "error_code": err_code,
+                    "error_details": {"err_code": err_code},
+                }
+
+        except ValueError as e:
             logger.error(
-                f"Network error redeeming gift code '{gift_code}' for player {player_id}: {e}",
+                f"Validation/Parse error redeeming gift code '{gift_code}' for player {player_id}: {e}",
                 exc_info=True,
             )
             return {
                 "success": False,
-                "message": "Network error occurred while redeeming gift code.",
-                "error_code": "NETWORK_ERROR",
+                "message": "Error communicating with the API.",
+                "error_code": "API_ERROR",
             }
         except Exception as e:
             logger.error(
@@ -248,52 +238,11 @@ class GiftCodeService(IGiftCodeService):
 
     async def get_available_gift_codes(self) -> Dict[str, Any]:
         """
-        Get available gift codes from the API.
-
-        Returns:
-            Dictionary containing the API response with gift codes list
+        Original Kingshot API does not support fetching available gift codes.
+        Returns a hardcoded error.
         """
-        logger.info(f"Fetching available gift codes from {self._list_endpoint}")
-
-        try:
-            # Ensure session is available
-            http_session = await self.ensure_session()
-            async with http_session.get(
-                self._list_endpoint,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
-                response_data = await response.json()
-
-                if response.status == 200 and response_data.get("status") == "success":
-                    logger.info(
-                        f"Successfully fetched gift codes: {response_data.get('data', {}).get('activeCount', 0)} active"
-                    )
-                    return {
-                        "success": True,
-                        "data": response_data.get("data"),
-                        "message": response_data.get("message", "Gift codes retrieved successfully"),
-                        "timestamp": response_data.get("timestamp"),
-                    }
-                else:
-                    error_message = response_data.get("message", "Failed to fetch gift codes")
-                    logger.warning(f"Failed to fetch gift codes: {error_message}")
-                    return {
-                        "success": False,
-                        "message": error_message,
-                        "status_code": response.status,
-                    }
-
-        except aiohttp.ClientError as e:
-            logger.error(f"Network error fetching gift codes: {e}", exc_info=True)
-            return {
-                "success": False,
-                "message": "Network error occurred while fetching gift codes.",
-                "error_code": "NETWORK_ERROR",
-            }
-        except Exception as e:
-            logger.error(f"Unexpected error fetching gift codes: {e}", exc_info=True)
-            return {
-                "success": False,
-                "message": "An unexpected error occurred.",
-                "error_code": "UNEXPECTED_ERROR",
-            }
+        return {
+            "success": False,
+            "message": "Original Kingshot API does not support listing available gift codes.",
+            "status_code": 404,
+        }

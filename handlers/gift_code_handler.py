@@ -45,11 +45,6 @@ class GiftCodeHandler:
             """Redeem a gift code for all registered players."""
             await self._handle_redeem_gift_code_slash(interaction, gift_code)
 
-        @self._bot.tree.command(name="giftcodes", description="List all available gift codes")
-        async def list_gift_codes(interaction: discord.Interaction):
-            """List all available gift codes."""
-            await self._handle_list_gift_codes_slash(interaction)
-
         @self._bot.tree.command(name="addplayer", description="Add a player to gift code redemption list")
         @app_commands.describe(player_id="The player ID (API name) to add")
         async def add_player(interaction: discord.Interaction, player_id: str):
@@ -190,120 +185,6 @@ class GiftCodeHandler:
             await interaction.followup.send(
                 "❌ An unexpected error occurred while processing the redemption. Please try again later."
             )
-
-    async def _handle_list_gift_codes_slash(self, interaction: discord.Interaction):
-        """
-        Handle listing all available gift codes.
-
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(thinking=True)
-
-        user_info = f"{interaction.user.name}#{interaction.user.discriminator} (ID: {interaction.user.id})"
-        guild_info = f"{interaction.guild.name} (ID: {interaction.guild.id})" if interaction.guild else "DM"
-
-        logger.info(f"List gift codes command requested by {user_info} in {guild_info}")
-
-        try:
-            # Fetch gift codes from API
-            result = await self._gift_code_service.get_available_gift_codes()
-
-            if not result.get("success"):
-                await interaction.followup.send(
-                    "❌ Failed to fetch gift codes from the API.\n"
-                    "Please try again later or contact an administrator."
-                )
-                logger.warning(f"Failed to fetch gift codes: {result.get('message')}")
-                return
-
-            data = result.get("data", {})
-            gift_codes = data.get("giftCodes", [])
-            total = data.get("total", 0)
-            active_count = data.get("activeCount", 0)
-            expired_count = data.get("expiredCount", 0)
-
-            if not gift_codes:
-                await interaction.followup.send("📭 No gift codes available at the moment.")
-                return
-
-            # Separate active and expired codes
-            active_codes = []
-            expired_codes = []
-
-            for code in gift_codes:
-                expires_at = code.get("expiresAt")
-                if expires_at:
-                    try:
-                        expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                        now = datetime.now(timezone.utc)
-                        if expires_dt > now:
-                            active_codes.append(code)
-                        else:
-                            expired_codes.append(code)
-                    except (ValueError, AttributeError):
-                        # If parsing fails, treat as active
-                        active_codes.append(code)
-                else:
-                    # No expiration date = permanent code
-                    active_codes.append(code)
-
-            # Create main embed
-            embed = discord.Embed(
-                title="🎁 Available Gift Codes",
-                description=(f"**Total:** {total} | **Active:** {active_count} | **Expired:** {expired_count}"),
-                color=discord.Color.gold(),
-            )
-
-            # Add active codes field
-            if active_codes:
-                active_text = []
-                for code in active_codes[:15]:  # Show first 15
-                    code_name = code.get("code", "UNKNOWN")
-                    expires_at = code.get("expiresAt")
-
-                    if expires_at:
-                        try:
-                            expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                            # Format as relative time or specific date
-                            expires_str = f"Expires: {expires_dt.strftime('%Y-%m-%d %H:%M UTC')}"
-                        except (ValueError, AttributeError):
-                            expires_str = "No expiration"
-                    else:
-                        expires_str = "Permanent 🔓"
-
-                    active_text.append(f"✅ `{code_name}`\n   └─ {expires_str}")
-
-                active_str = "\n".join(active_text)
-                if len(active_codes) > 15:
-                    active_str += f"\n*... and {len(active_codes) - 15} more*"
-
-                embed.add_field(name=f"✅ Active ({len(active_codes)})", value=active_str, inline=False)
-
-            # Add expired codes field (optional, show fewer)
-            if expired_codes and len(expired_codes) <= 5:
-                expired_text = []
-                for code in expired_codes:
-                    code_name = code.get("code", "UNKNOWN")
-                    expired_text.append(f"⛔ `{code_name}`")
-
-                expired_str = "\n".join(expired_text)
-                embed.add_field(name=f"⛔ Expired ({len(expired_codes)})", value=expired_str, inline=False)
-            elif expired_codes:
-                embed.add_field(
-                    name=f"⛔ Expired ({len(expired_codes)})",
-                    value=f"*{len(expired_codes)} expired codes available*",
-                    inline=False,
-                )
-
-            embed.set_footer(text="Use /redeem {code} to redeem a gift code for all your registered players")
-
-            await interaction.followup.send(embed=embed)
-            logger.info(f"Successfully listed {len(gift_codes)} gift codes for {user_info}")
-
-        except Exception as e:
-            logger.error(f"Error listing gift codes: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while fetching gift codes. Please try again later.")
 
     async def _send_redemption_results_slash(
         self,
