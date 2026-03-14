@@ -1,6 +1,7 @@
 import hashlib
 import time
 import urllib.parse
+import asyncio
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -57,18 +58,35 @@ class KingshotAPIClient:
         url = f"{HOSTNAME}/api{path}"
         session = await self.ensure_session()
 
-        try:
-            async with session.post(
-                url, data=body, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                try:
-                    # E.g. {'code': 1, 'msg': 'role not exist.', 'data': [], 'err_code': 40004}
-                    return await response.json()
-                except Exception as e:
-                    text = await response.text()
-                    raise ValueError(f"Failed to parse JSON response: {text}") from e
-        except Exception as e:
-            raise ValueError(f"HTTP request failed: {e}") from e
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with session.post(
+                    url, data=body, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 429:
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 * (attempt + 1))
+                            continue
+                        return {"code": 1, "msg": "API rate limit exceeded (429 Too Many Requests).", "err_code": 429}
+                    
+                    try:
+                        # E.g. {'code': 1, 'msg': 'role not exist.', 'data': [], 'err_code': 40004}
+                        return await response.json()
+                    except Exception as e:
+                        text = await response.text()
+                        if response.status != 200:
+                            return {"code": 1, "msg": f"HTTP Error {response.status}", "err_code": response.status}
+                        raise ValueError(f"Failed to parse JSON response: {text}") from e
+            except aiohttp.ClientError as e:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                raise ValueError(f"HTTP request failed: {e}") from e
+            except Exception as e:
+                raise ValueError(f"Unexpected request error: {e}") from e
+        
+        return {"code": 1, "msg": "Max retries exceeded.", "err_code": 500}
 
     async def get_player(self, player_id: str) -> Dict[str, Any]:
         """Fetch player information."""

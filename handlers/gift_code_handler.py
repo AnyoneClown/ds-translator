@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List
@@ -129,6 +130,11 @@ class GiftCodeHandler:
                             continue
 
                         player_id_int = int(player.player_id)
+                        
+                        # Add jitter/delay to prevent 429 Too Many Requests from bulk redemption
+                        if len(results) > 0:
+                            await asyncio.sleep(1.0)
+                            
                         result = await self._gift_code_service.redeem_gift_code(session, player_id_int, gift_code)
 
                         # Log to database

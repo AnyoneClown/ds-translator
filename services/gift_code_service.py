@@ -174,7 +174,7 @@ class GiftCodeService(IGiftCodeService):
                     "data": response_data.get("data"),
                 }
             else:
-                err_code = response_data.get("err_code")
+                err_code = str(response_data.get("err_code", ""))
                 
                 # Check if the error indicates the code was already redeemed
                 already_redeemed_phrases = [
