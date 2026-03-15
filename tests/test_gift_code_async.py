@@ -47,18 +47,18 @@ async def test_concurrent_execution_time():
 
 
 @pytest.mark.asyncio
-async def test_shared_session_reuse():
-    """Verify that the service reuses the same session across requests."""
+async def test_shared_client_reuse():
+    """Verify that the service reuses the same client across requests."""
     service = GiftCodeService()
 
-    # Get session twice
-    session1 = await service.ensure_session()
-    session2 = await service.ensure_session()
+    # Get client twice
+    client1 = await service.ensure_client()
+    client2 = await service.ensure_client()
 
     # Should be the same object
-    assert session1 is session2, "Session should be reused, not recreated"
+    assert client1 is client2, "Client should be reused, not recreated"
 
-    print("✓ Session reuse verified")
+    print("✓ Client reuse verified")
 
     await service.close()
 
@@ -67,10 +67,10 @@ async def test_shared_session_reuse():
 async def test_context_manager_cleanup():
     """Verify that context manager properly initializes and cleans up."""
     async with GiftCodeService() as service:
-        assert service._session is not None, "Session should be initialized in context manager"
+        assert service._client is not None, "Client should be initialized in context manager"
 
-    # After exiting, session should be None
-    assert service._session is None, "Session should be closed after context manager exit"
+    # After exiting, client should be None
+    assert service._client is None, "Client should be closed after context manager exit"
 
     print("✓ Context manager cleanup verified")
 
@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
     # Run all tests
     asyncio.run(test_concurrent_execution_time())
-    asyncio.run(test_shared_session_reuse())
+    asyncio.run(test_shared_client_reuse())
     asyncio.run(test_context_manager_cleanup())
 
     print("All async tests passed! ✓")

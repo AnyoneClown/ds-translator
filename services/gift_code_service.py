@@ -161,6 +161,13 @@ class GiftCodeService(IGiftCodeService):
         try:
             # Ensure client is available 
             api_client = await self.ensure_client()
+            
+            # The API requires an active session with cookies from the get_player call
+            # Otherwise we'll receive a 'NOT LOGIN' error during redemption
+            player_resp = await api_client.get_player(str(player_id))
+            if player_resp.get("code") != 0:
+                logger.warning(f"Failed to get_player before redeeming for {player_id}: {player_resp}")
+
             response_data = await api_client.redeem_code(str(player_id), gift_code)
 
             code = response_data.get("code")
@@ -187,6 +194,7 @@ class GiftCodeService(IGiftCodeService):
                     "collected",
                     "same type exchange",
                     "time error",
+                    "received."
                 ]
                 is_already_redeemed = any(phrase in msg.lower() for phrase in already_redeemed_phrases)
 
