@@ -246,11 +246,49 @@ class GiftCodeService(IGiftCodeService):
 
     async def get_available_gift_codes(self) -> Dict[str, Any]:
         """
-        Original Kingshot API does not support fetching available gift codes.
-        Returns a hardcoded error.
+        Get available gift codes from kingshot.net API.
+        
+        Returns:
+            Dictionary containing the API response with status and giftcodes
         """
-        return {
-            "success": False,
-            "message": "Original Kingshot API does not support listing available gift codes.",
-            "status_code": 404,
-        }
+        url = "https://kingshot.net/api/gift-codes"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        logger.error(f"Failed to fetch gift codes from kingshot.net, status: {response.status}")
+                        return {
+                            "success": False,
+                            "message": f"HTTP Error {response.status}",
+                        }
+                    
+                    data = await response.json()
+                    
+                    if data.get("status") != "success":
+                        logger.error(f"kingshot.net API returned non-success status: {data.get('status')}")
+                        return {
+                            "success": False,
+                            "message": data.get("message", "API Error"),
+                        }
+                    
+                    codes = data.get("data", {}).get("giftCodes", [])
+                    logger.info(f"Successfully fetched {len(codes)} gift codes from kingshot.net")
+                    
+                    return {
+                        "success": True,
+                        "data": codes,
+                    }
+                    
+        except asyncio.TimeoutError:
+            logger.error("Timeout fetching gift codes from kingshot.net")
+            return {
+                "success": False,
+                "message": "Request timed out",
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error fetching gift codes from kingshot.net: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": "An unexpected error occurred",
+            }

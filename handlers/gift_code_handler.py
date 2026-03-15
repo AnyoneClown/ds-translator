@@ -5,7 +5,7 @@ from typing import Dict, List
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from db import get_db
 from services.database_service import DatabaseService
@@ -63,11 +63,185 @@ class GiftCodeHandler:
             """List all registered players for gift code redemption."""
             await self._handle_list_players_slash(interaction)
 
+        @self._bot.tree.command(name="giftcodes", description="List available gift codes")
+        async def list_giftcodes(interaction: discord.Interaction):
+            """List available gift codes from the API."""
+            await self._handle_list_gift_codes_slash(interaction)
+
         @self._bot.tree.command(name="toggleplayer", description="Enable/disable a player for gift code redemption")
         @app_commands.describe(player_id="The player ID to toggle")
         async def toggle_player(interaction: discord.Interaction, player_id: str):
             """Enable/disable a player for gift code redemption."""
             await self._handle_toggle_player_slash(interaction, player_id)
+
+    def start_polling_task(self):
+        """Start the background task that checks for new gift codes."""
+
+        @tasks.loop(minutes=10)
+        async def poll_gift_codes():
+            """Check for new gift codes and redeem them for all users."""
+            logger.info("Polling for new gift codes...")
+            
+            try:
+                # Fetch available codes from 3rd party API
+                response = await self._gift_code_service.get_available_gift_codes()
+                if not response.get("success"):
+                    logger.warning(f"Failed to poll gift codes: {response.get('message')}")
+                    return
+                
+                codes = response.get("data", [])
+                if not codes:
+                    return
+
+                db = get_db()
+                async with db.session() as session:
+                    # Check which codes are new
+                    new_codes_found = []
+                    
+                    for row in codes:
+                        code_id = row.get("id")
+                        code_str = row.get("code")
+                        
+                        if not code_id or not code_str:
+                            continue
+                            
+                        # Parse dates
+                        created_at_api = row.get("createdAt")
+                        expires_at = row.get("expiresAt")
+                        
+                        try:
+                            # Parse ISO format datetime strings
+                            dt_created = datetime.fromisoformat(created_at_api.replace('Z', '+00:00')) if created_at_api else datetime.now(timezone.utc)
+                            dt_expires = datetime.fromisoformat(expires_at.replace('Z', '+00:00')) if expires_at else None
+                            
+                            is_new, _ = await DatabaseService.add_or_update_gift_code(
+                                session, code_id, code_str, dt_created, dt_expires
+                            )
+                            
+                            if is_new:
+                                new_codes_found.append(code_str)
+                                
+                        except ValueError as e:
+                            logger.error(f"Error parsing date for gift code {code_str}: {e}")
+                            
+                    # If we found new codes, redeem them!
+                    if new_codes_found:
+                        logger.info(f"Found {len(new_codes_found)} new gift codes. Starting auto-redemption...")
+                        
+                        # Ensure the bot user exists in the database to satisfy the foreign key constraint
+                        bot_user_id = self._bot.user.id if self._bot.user else 0
+                        bot_username = self._bot.user.name if self._bot.user else "System Bot"
+                        bot_discriminator = getattr(self._bot.user, "discriminator", "0000") if self._bot.user else "0000"
+                        bot_display_name = getattr(self._bot.user, "display_name", "System Bot") if self._bot.user else "System Bot"
+                        
+                        await DatabaseService.get_or_create_user(
+                            session,
+                            bot_user_id,
+                            bot_username,
+                            bot_discriminator,
+                            bot_display_name,
+                        )
+                        
+                        # Get all enabled players
+                        registered_players = await DatabaseService.get_registered_players(session, enabled_only=True)
+                        
+                        if not registered_players:
+                            logger.info("No registered players to auto-redeem for.")
+                            return
+                            
+                        # Redeem each code for each player
+                        for new_code in new_codes_found:
+                            logger.info(f"Auto-redeeming code '{new_code}' for {len(registered_players)} players...")
+                            
+                            # Fetch already redeemed set specific to this code to minimize lookups
+                            already_redeemed = await self._gift_code_service.get_redeemed_players(session, new_code)
+                            
+                            for player in registered_players:
+                                if player.player_id in already_redeemed:
+                                    continue
+                                    
+                                try:
+                                    player_id_int = int(player.player_id)
+                                    
+                                    # Add jitter to avoid rating limits
+                                    await asyncio.sleep(1.0)
+                                    
+                                    result = await self._gift_code_service.redeem_gift_code(session, player_id_int, new_code)
+                                    
+                                    # We need a system bot user ID since there is no interaction context
+                                    # We use the bot's user ID
+                                    bot_user_id = self._bot.user.id if self._bot.user else 0
+                                    
+                                    await DatabaseService.log_gift_code_redemption(
+                                        session,
+                                        user_id=bot_user_id,
+                                        player_id=player.player_id,
+                                        gift_code=new_code,
+                                        success=result.get("success", False),
+                                        response_message=result.get("message"),
+                                        error_code=result.get("error_code")
+                                    )
+                                    
+                                except Exception as e:
+                                    logger.error(f"Error auto-redeeming {new_code} for {player.player_id}: {e}")
+                                    
+            except Exception as e:
+                logger.error(f"Error in poll_gift_codes background task: {e}")
+
+        # Wait until bot is fully ready before running the loop
+        @poll_gift_codes.before_loop
+        async def before_polling():
+            logger.info("Waiting for bot to be ready before starting gift code polling...")
+            await self._bot.wait_until_ready()
+            
+        poll_gift_codes.start()
+
+    async def _handle_list_gift_codes_slash(self, interaction: discord.Interaction):
+        """Handle listing available gift codes."""
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            response = await self._gift_code_service.get_available_gift_codes()
+            
+            if not response.get("success"):
+                await interaction.followup.send(f"❌ Failed to fetch gift codes: {response.get('message')}")
+                return
+                
+            codes = response.get("data", [])
+            
+            if not codes:
+                await interaction.followup.send("📋 No active gift codes found.")
+                return
+                
+            embed = discord.Embed(
+                title="🎁 Active Gift Codes",
+                description="List of available gift codes to redeem",
+                color=discord.Color.green(),
+            )
+            
+            for code in codes:
+                code_str = code.get("code", "UNKNOWN")
+                expires_at = code.get("expiresAt")
+                
+                value = "`" + code_str + "`"
+                if expires_at:
+                    try:
+                        # Attempt to parse ISO string and format
+                        dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                        value += f"\nExpires: <t:{int(dt.timestamp())}:R>"
+                    except ValueError:
+                        value += f"\nExpires: {expires_at}"
+                else:
+                    value += "\nNo expiration"
+                    
+                embed.add_field(name="Gift Code", value=value, inline=False)
+                
+            embed.set_footer(text="Use /redeem to run manual redemptions or wait for auto-redeem")
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"Error listing gift codes: {e}", exc_info=True)
+            await interaction.followup.send("❌ An unexpected error occurred while fetching gift codes.")
 
     async def _handle_redeem_gift_code_slash(self, interaction: discord.Interaction, gift_code: str):
         """

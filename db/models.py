@@ -165,6 +165,23 @@ class GiftCodeRedemption(Base):
         return f"<GiftCodeRedemption(id={self.id}, user_id={self.user_id}, player_id={self.player_id}, gift_code={self.gift_code})>"
 
 
+class GiftCode(Base):
+    """Gift codes fetched from the 3rd party API."""
+
+    __tablename__ = "gift_codes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # Using ID from API
+    code: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at_api: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<GiftCode(id={self.id}, code={self.code})>"
+
+
 class OCRRequest(Base):
     """Log of all OCR requests made by users."""
 

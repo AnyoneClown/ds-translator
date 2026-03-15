@@ -105,6 +105,9 @@ class TranslatorBot:
 
             self.event_handler.start_scheduler_task()
             logger.info("Event scheduler task started")
+            
+            self.gift_code_handler.start_polling_task()
+            logger.info("Auto gift code polling task started")
 
         @self.bot.event
         async def on_command_error(ctx, error):

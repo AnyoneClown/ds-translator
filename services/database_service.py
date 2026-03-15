@@ -355,3 +355,62 @@ class DatabaseService:
         else:
             logger.warning(f"Attempted to toggle non-existent player {player_id}")
             return None
+
+    @staticmethod
+    async def add_or_update_gift_code(
+        session: AsyncSession,
+        code_id: int,
+        code: str,
+        created_at_api: datetime,
+        expires_at: Optional[datetime] = None,
+    ) -> tuple[bool, "GiftCode"]:
+        """
+        Add a new gift code or update an existing one.
+
+        Args:
+            session: Database session
+            code_id: Gift code ID from API
+            code: The gift code string
+            created_at_api: When the code was created in the API
+            expires_at: When the code expires (optional)
+
+        Returns:
+            Tuple of (is_new, GiftCode)
+        """
+        from db.models import GiftCode
+        
+        result = await session.execute(select(GiftCode).where(GiftCode.id == code_id))
+        existing_code = result.scalar_one_or_none()
+
+        if existing_code:
+            existing_code.expires_at = expires_at
+            logger.debug(f"Updated existing gift code {code} (ID: {code_id})")
+            return False, existing_code
+        else:
+            new_code = GiftCode(
+                id=code_id,
+                code=code,
+                expires_at=expires_at,
+                created_at_api=created_at_api,
+            )
+            session.add(new_code)
+            logger.info(f"Added new tracked gift code: {code} (ID: {code_id})")
+            return True, new_code
+            
+    @staticmethod
+    async def get_all_gift_codes(session: AsyncSession) -> list["GiftCode"]:
+        """
+        Get all tracked gift codes.
+        
+        Args:
+            session: Database session
+            
+        Returns:
+            List of GiftCode objects
+        """
+        from db.models import GiftCode
+        
+        result = await session.execute(
+            select(GiftCode).order_by(GiftCode.created_at_api.desc())
+        )
+        return list(result.scalars().all())
