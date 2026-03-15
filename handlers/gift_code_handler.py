@@ -12,6 +12,8 @@ from services.database_service import DatabaseService
 from services.gift_code_service import IGiftCodeService
 from services.player_info_service import IPlayerInfoService
 
+from config.bot_config import BotConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,6 +25,7 @@ class GiftCodeHandler:
         gift_code_service: IGiftCodeService,
         player_info_service: IPlayerInfoService,
         bot: commands.Bot,
+        config: BotConfig,
     ):
         """
         Initialize gift code handler.
@@ -31,10 +34,12 @@ class GiftCodeHandler:
             gift_code_service: Service for redeeming gift codes
             player_info_service: Service for validating player existence
             bot: Discord bot instance
+            config: Bot configuration
         """
         self._gift_code_service = gift_code_service
         self._player_info_service = player_info_service
         self._bot = bot
+        self._config = config
         logger.info("GiftCodeHandler initialized")
 
     def register_commands(self):
@@ -156,8 +161,14 @@ class GiftCodeHandler:
                             # Fetch already redeemed set specific to this code to minimize lookups
                             already_redeemed = await self._gift_code_service.get_redeemed_players(session, new_code)
                             
+                            # Track results for this specific code
+                            success_count = 0
+                            failed_count = 0
+                            already_redeemed_count = 0
+                            
                             for player in registered_players:
                                 if player.player_id in already_redeemed:
+                                    already_redeemed_count += 1
                                     continue
                                     
                                 try:
@@ -168,6 +179,14 @@ class GiftCodeHandler:
                                     
                                     result = await self._gift_code_service.redeem_gift_code(session, player_id_int, new_code)
                                     
+                                    # Track success/failure
+                                    if result.get("success", False):
+                                        success_count += 1
+                                    elif result.get("already_redeemed_by_api", False) or result.get("already_redeemed", False):
+                                        already_redeemed_count += 1
+                                    else:
+                                        failed_count += 1
+                                        
                                     # We need a system bot user ID since there is no interaction context
                                     # We use the bot's user ID
                                     bot_user_id = self._bot.user.id if self._bot.user else 0
@@ -184,7 +203,35 @@ class GiftCodeHandler:
                                     
                                 except Exception as e:
                                     logger.error(f"Error auto-redeeming {new_code} for {player.player_id}: {e}")
+                                    failed_count += 1
                                     
+                            # Send Discord announcement if channels are configured
+                            if self._config.auto_redeem_channels:
+                                embed = discord.Embed(
+                                    title="🎁 New Gift Code Found!",
+                                    description=f"Auto-redemption triggered for newly discovered gift code.",
+                                    color=discord.Color.brand_green(),
+                                )
+                                embed.add_field(name="Gift Code", value=f"`{new_code}`", inline=False)
+                                embed.add_field(name="Auto-Redeem Status", value=(
+                                    f"✅ **Success**: {success_count}\n"
+                                    f"🔄 **Already Claimed**: {already_redeemed_count}\n"
+                                    f"❌ **Failed**: {failed_count}\n"
+                                    f"👥 **Total Players**: {len(registered_players)}"
+                                ), inline=False)
+                                embed.set_footer(text="Check in-game mail for successfully redeemed codes!")
+                                
+                                for channel_id in self._config.auto_redeem_channels:
+                                    channel = self._bot.get_channel(channel_id)
+                                    if channel and isinstance(channel, discord.TextChannel):
+                                        try:
+                                            await channel.send(embed=embed)
+                                            logger.info(f"Announced gift code {new_code} in channel {channel_id}")
+                                        except Exception as e:
+                                            logger.error(f"Failed to send gift code announcement to channel {channel_id}: {e}")
+                                    else:
+                                        logger.warning(f"Configured auto-redeem channel {channel_id} not found or is not a text channel")
+                                        
             except Exception as e:
                 logger.error(f"Error in poll_gift_codes background task: {e}")
 

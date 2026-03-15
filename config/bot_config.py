@@ -16,11 +16,14 @@ class BotConfig:
     command_prefix: str = "!"
     translator_role_name: str = "Translator"
     banned_players: set = None
+    auto_redeem_channels: set = None
 
     def __post_init__(self):
         """Initialize mutable default values."""
         if self.banned_players is None:
             self.banned_players = set()
+        if self.auto_redeem_channels is None:
+            self.auto_redeem_channels = set()
 
     @classmethod
     def from_env(cls) -> "BotConfig":
@@ -47,6 +50,15 @@ class BotConfig:
                 banned_players = set(int(user_id.strip()) for user_id in banned_players_str.split(",") if user_id.strip())
             except ValueError:
                 raise ValueError("BANNED_PLAYERS must contain comma-separated user IDs (integers)")
+                
+        # Parse auto redeem announcement channels from environment variable (comma-separated channel IDs)
+        auto_redeem_channels_str = os.getenv("AUTO_REDEEM_CHANNELS", "")
+        auto_redeem_channels = set()
+        if auto_redeem_channels_str.strip():
+            try:
+                auto_redeem_channels = set(int(channel_id.strip()) for channel_id in auto_redeem_channels_str.split(",") if channel_id.strip())
+            except ValueError:
+                raise ValueError("AUTO_REDEEM_CHANNELS must contain comma-separated channel IDs (integers)")
 
         return cls(
             discord_token=discord_token,
@@ -55,4 +67,5 @@ class BotConfig:
             command_prefix=os.getenv("COMMAND_PREFIX", "!"),
             translator_role_name=os.getenv("TRANSLATOR_ROLE", "Translator"),
             banned_players=banned_players,
+            auto_redeem_channels=auto_redeem_channels,
         )
