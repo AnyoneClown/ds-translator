@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import GiftCodeRedemption, PlayerLookupLog, RegisteredPlayer, TranslationLog, User
+from db.models import GiftCode, GiftCodeRedemption, PlayerLookupLog, RegisteredPlayer, TranslationLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +218,8 @@ class DatabaseService:
         player_id: str,
         added_by_user_id: int,
         player_name: Optional[str] = None,
+        kingdom: Optional[str] = None,
+        castle_level: Optional[str] = None,
         enabled: bool = True,
     ) -> RegisteredPlayer:
         """
@@ -228,6 +230,8 @@ class DatabaseService:
             player_id: The player ID to register
             added_by_user_id: Discord user ID who added the player
             player_name: Player name (optional)
+            kingdom: Player kingdom (optional)
+            castle_level: Player castle level (optional)
             enabled: Whether the player is enabled for redemption
 
         Returns:
@@ -242,6 +246,10 @@ class DatabaseService:
             existing_player.enabled = enabled
             if player_name:
                 existing_player.player_name = player_name
+            if kingdom is not None:
+                existing_player.kingdom = kingdom
+            if castle_level is not None:
+                existing_player.castle_level = castle_level
             existing_player.added_by_user_id = added_by_user_id
             await session.flush()
             logger.info(f"Updated registered player {player_id} (enabled={enabled})")
@@ -251,6 +259,8 @@ class DatabaseService:
             player = RegisteredPlayer(
                 player_id=player_id,
                 player_name=player_name,
+                kingdom=kingdom,
+                castle_level=castle_level,
                 enabled=enabled,
                 added_by_user_id=added_by_user_id,
             )
@@ -357,13 +367,39 @@ class DatabaseService:
             return None
 
     @staticmethod
+    async def update_registered_player_metadata(
+        session: AsyncSession,
+        player_id: str,
+        player_name: Optional[str] = None,
+        kingdom: Optional[str] = None,
+        castle_level: Optional[str] = None,
+    ) -> bool:
+        """Update metadata for an existing registered player if present."""
+        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
+        player = result.scalar_one_or_none()
+
+        if not player:
+            return False
+
+        if player_name:
+            player.player_name = player_name
+        if kingdom is not None:
+            player.kingdom = kingdom
+        if castle_level is not None:
+            player.castle_level = castle_level
+
+        await session.flush()
+        logger.debug("Refreshed metadata for registered player %s", player_id)
+        return True
+
+    @staticmethod
     async def add_or_update_gift_code(
         session: AsyncSession,
         code_id: int,
         code: str,
         created_at_api: datetime,
         expires_at: Optional[datetime] = None,
-    ) -> tuple[bool, "GiftCode"]:
+    ) -> tuple[bool, GiftCode]:
         """
         Add a new gift code or update an existing one.
 
@@ -377,8 +413,6 @@ class DatabaseService:
         Returns:
             Tuple of (is_new, GiftCode)
         """
-        from db.models import GiftCode
-
         result = await session.execute(select(GiftCode).where(GiftCode.id == code_id))
         existing_code = result.scalar_one_or_none()
 
@@ -398,7 +432,7 @@ class DatabaseService:
             return True, new_code
 
     @staticmethod
-    async def get_all_gift_codes(session: AsyncSession) -> list["GiftCode"]:
+    async def get_all_gift_codes(session: AsyncSession) -> list[GiftCode]:
         """
         Get all tracked gift codes.
 
@@ -408,7 +442,5 @@ class DatabaseService:
         Returns:
             List of GiftCode objects
         """
-        from db.models import GiftCode
-
         result = await session.execute(select(GiftCode).order_by(GiftCode.created_at_api.desc()))
         return list(result.scalars().all())

@@ -128,6 +128,17 @@ class PlayerInfoHandler:
                         guild_id=interaction.guild_id,
                         channel_id=interaction.channel_id,
                     )
+                    await DatabaseService.update_registered_player_metadata(
+                        session,
+                        player_id=str(player_data.get("playerId") or player_id),
+                        player_name=player_name,
+                        kingdom=(str(player_data.get("kingdom")) if player_data.get("kingdom") is not None else None),
+                        castle_level=(
+                            str(player_data.get("levelRenderedDetailed") or player_data.get("level"))
+                            if (player_data.get("levelRenderedDetailed") or player_data.get("level") is not None)
+                            else None
+                        ),
+                    )
                     logger.debug(f"Tracked player stats request by user {interaction.user.id}")
             except Exception as db_error:
                 logger.error(f"Database tracking error: {db_error}", exc_info=True)

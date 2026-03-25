@@ -113,6 +113,8 @@ class RegisteredPlayer(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     player_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    kingdom: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    castle_level: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
     added_by_user_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -131,7 +133,10 @@ class RegisteredPlayer(Base):
     added_by: Mapped["User"] = relationship("User", back_populates="registered_players")
 
     def __repr__(self) -> str:
-        return f"<RegisteredPlayer(id={self.id}, player_id={self.player_id}, player_name={self.player_name}, enabled={self.enabled})>"
+        return (
+            f"<RegisteredPlayer(id={self.id}, player_id={self.player_id}, player_name={self.player_name}, "
+            f"kingdom={self.kingdom}, castle_level={self.castle_level}, enabled={self.enabled})>"
+        )
 
 
 class GiftCodeRedemption(Base):

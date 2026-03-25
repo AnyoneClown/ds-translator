@@ -277,13 +277,6 @@ class GiftCodeService(IGiftCodeService):
                         "success": True,
                         "data": codes,
                     }
-
-        except asyncio.TimeoutError:
-            logger.error("Timeout fetching gift codes from kingshot.net")
-            return {
-                "success": False,
-                "message": "Request timed out",
-            }
         except Exception as e:
             logger.error(f"Unexpected error fetching gift codes from kingshot.net: {e}", exc_info=True)
             return {

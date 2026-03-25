@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import discord
 from discord import app_commands
@@ -14,6 +14,77 @@ from services.gift_code_service import IGiftCodeService
 from services.player_info_service import IPlayerInfoService
 
 logger = logging.getLogger(__name__)
+
+
+class PlayerListPaginationView(discord.ui.View):
+    """Single-message pagination for registered player list embeds."""
+
+    def __init__(
+        self,
+        pages: List[List[str]],
+        total_players: int,
+        enabled_count: int,
+        disabled_count: int,
+        author_id: int,
+        timeout: float = 180.0,
+    ):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.total_players = total_players
+        self.enabled_count = enabled_count
+        self.disabled_count = disabled_count
+        self.author_id = author_id
+        self.current_page = 0
+        self.message: Optional[discord.Message] = None
+        self._update_button_state()
+
+    def _update_button_state(self) -> None:
+        is_first = self.current_page == 0
+        is_last = self.current_page >= len(self.pages) - 1
+        self.prev_button.disabled = is_first
+        self.next_button.disabled = is_last
+
+    def build_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title="📋 Registered Players for Gift Code Redemption",
+            description=(
+                f"**Total:** {self.total_players} | **Enabled:** {self.enabled_count} | "
+                f"**Disabled:** {self.disabled_count}\n"
+                f"**Page:** {self.current_page + 1}/{len(self.pages)}"
+            ),
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Players", value="\n".join(self.pages[self.current_page]), inline=False)
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the command user can control this pagination.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="←", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page -= 1
+        self._update_button_state()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="→", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page += 1
+        self._update_button_state()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def on_timeout(self) -> None:
+        self.prev_button.disabled = True
+        self.next_button.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                logger.debug("Failed to disable pagination buttons after timeout", exc_info=True)
 
 
 class GiftCodeHandler:
@@ -86,7 +157,7 @@ class GiftCodeHandler:
     def start_polling_task(self):
         """Start the background task that checks for new gift codes."""
 
-        @tasks.loop(minutes=10)
+        @tasks.loop(minutes=1)
         async def poll_gift_codes():
             """Check for new gift codes and redeem them for all users."""
             logger.info("Polling for new gift codes...")
@@ -565,12 +636,43 @@ class GiftCodeHandler:
             line = f"{status} `{player.player_id}`"
             if player.player_name:
                 line += f" - {player.player_name}"
+            meta_parts = []
+            if getattr(player, "kingdom", None):
+                meta_parts.append(f"K:{player.kingdom}")
+            if getattr(player, "castle_level", None):
+                meta_parts.append(f"CL:{player.castle_level}")
+            if meta_parts:
+                line += f" ({' | '.join(meta_parts)})"
             lines.append(line)
         return lines
 
     def _chunk_lines(self, lines: List[str], page_size: int) -> List[List[str]]:
         """Split lines into fixed-size pages."""
         return [lines[idx : idx + page_size] for idx in range(0, len(lines), page_size)]
+
+    async def _sync_player_metadata_from_lookup(self, player_id: str, player_info: Optional[Dict]) -> None:
+        """Refresh registered player metadata when a player lookup succeeds."""
+        if not player_info:
+            return
+
+        resolved_player_id = str(player_info.get("playerId") or player_id)
+        resolved_name = player_info.get("name")
+        resolved_kingdom = str(player_info.get("kingdom")) if player_info.get("kingdom") is not None else None
+        resolved_castle_level = (
+            str(player_info.get("levelRenderedDetailed") or player_info.get("level"))
+            if (player_info.get("levelRenderedDetailed") or player_info.get("level") is not None)
+            else None
+        )
+
+        db = get_db()
+        async with db.session() as session:
+            await DatabaseService.update_registered_player_metadata(
+                session=session,
+                player_id=resolved_player_id,
+                player_name=resolved_name,
+                kingdom=resolved_kingdom,
+                castle_level=resolved_castle_level,
+            )
 
     async def _handle_add_player_slash(self, interaction: discord.Interaction, player_id: str):
         """Handle adding a player to the redemption list."""
@@ -592,6 +694,8 @@ class GiftCodeHandler:
                 logger.warning(f"Attempt to add non-existent player ID {player_id}")
                 return
 
+            await self._sync_player_metadata_from_lookup(player_id, player_info)
+
             db = get_db()
             async with db.session() as session:
                 await DatabaseService.get_or_create_user(
@@ -603,13 +707,22 @@ class GiftCodeHandler:
                 )
 
                 # Use API-provided name only
+                resolved_player_id = str(player_info.get("playerId") or player_id)
                 resolved_name = player_info.get("name")
+                resolved_kingdom = str(player_info.get("kingdom")) if player_info.get("kingdom") is not None else None
+                resolved_castle_level = (
+                    str(player_info.get("levelRenderedDetailed") or player_info.get("level"))
+                    if (player_info.get("levelRenderedDetailed") or player_info.get("level") is not None)
+                    else None
+                )
 
                 await DatabaseService.add_registered_player(
                     session,
-                    player_id=player_id,
+                    player_id=resolved_player_id,
                     added_by_user_id=interaction.user.id,
                     player_name=resolved_name,
+                    kingdom=resolved_kingdom,
+                    castle_level=resolved_castle_level,
                     enabled=True,
                 )
 
@@ -618,13 +731,17 @@ class GiftCodeHandler:
                     description="Player has been added to the gift code redemption list.",
                     color=discord.Color.green(),
                 )
-                embed.add_field(name="Player ID", value=f"`{player_id}`", inline=True)
+                embed.add_field(name="Player ID", value=f"`{resolved_player_id}`", inline=True)
                 if resolved_name:
                     embed.add_field(name="Player Name", value=resolved_name, inline=True)
+                if resolved_kingdom:
+                    embed.add_field(name="Kingdom", value=resolved_kingdom, inline=True)
+                if resolved_castle_level:
+                    embed.add_field(name="Castle Level", value=resolved_castle_level, inline=True)
                 embed.add_field(name="Status", value="✅ Enabled", inline=True)
 
                 await interaction.followup.send(embed=embed)
-                logger.info(f"Player {player_id} added by {interaction.user.id}")
+                logger.info(f"Player {resolved_player_id} added by {interaction.user.id}")
 
         except Exception as e:
             logger.error(f"Error adding player {player_id}: {e}", exc_info=True)
@@ -693,19 +810,15 @@ class GiftCodeHandler:
                 player_lines = self._build_player_lines(ordered_players)
                 pages = self._chunk_lines(player_lines, page_size=20)
 
-                for page_number, page_lines in enumerate(pages, start=1):
-                    embed = discord.Embed(
-                        title="📋 Registered Players for Gift Code Redemption",
-                        description=(
-                            f"**Total:** {len(all_players)} | **Enabled:** {len(enabled_players)} | "
-                            f"**Disabled:** {len(disabled_players)}\n"
-                            f"**Page:** {page_number}/{len(pages)}"
-                        ),
-                        color=discord.Color.blue(),
-                    )
-                    embed.add_field(name="Players", value="\n".join(page_lines), inline=False)
-
-                    await interaction.followup.send(embed=embed)
+                view = PlayerListPaginationView(
+                    pages=pages,
+                    total_players=len(all_players),
+                    enabled_count=len(enabled_players),
+                    disabled_count=len(disabled_players),
+                    author_id=interaction.user.id,
+                )
+                message = await interaction.followup.send(embed=view.build_embed(), view=view)
+                view.message = message
 
         except Exception as e:
             logger.error(f"Error listing players: {e}", exc_info=True)
