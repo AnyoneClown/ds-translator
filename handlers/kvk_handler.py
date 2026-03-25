@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import discord
 from discord import app_commands
@@ -28,15 +28,24 @@ class KVKHandler:
     def register_commands(self):
         """Register all KVK commands with the bot."""
 
-        @self._bot.tree.command(name="kvk", description="Get KVK matches for a kingdom")
-        @app_commands.describe(kingdom_number="The kingdom number to fetch matches for (e.g., 1, 2, 3)")
-        async def get_kvk_matches(interaction: discord.Interaction, kingdom_number: int):
-            """Get KVK matches for a kingdom."""
-            await self._handle_get_kvk_matches_slash(interaction, kingdom_number)
+        @self._bot.tree.command(name="kvk", description="Get Nexus KVK stats for a kingdom")
+        @app_commands.describe(kingdom_number="The kingdom number to fetch stats for (e.g., 830)")
+        async def get_kvk_stats(interaction: discord.Interaction, kingdom_number: int):
+            """Get Nexus KVK stats for a kingdom."""
+            await self._handle_get_kvk_stats_slash(interaction, kingdom_number)
 
-    async def _handle_get_kvk_matches_slash(self, interaction: discord.Interaction, kingdom_number: int):
+        @self._bot.tree.command(name="kvk_compare", description="Compare Nexus KVK stats for two kingdoms")
+        @app_commands.describe(
+            kingdom_a="First kingdom number to compare",
+            kingdom_b="Second kingdom number to compare",
+        )
+        async def compare_kvk_stats(interaction: discord.Interaction, kingdom_a: int, kingdom_b: int):
+            """Compare Nexus KVK stats for two kingdoms."""
+            await self._handle_compare_kvk_slash(interaction, kingdom_a, kingdom_b)
+
+    async def _handle_get_kvk_stats_slash(self, interaction: discord.Interaction, kingdom_number: int):
         """
-        Handle fetching KVK matches for a kingdom.
+        Handle fetching Nexus KVK stats for a kingdom.
 
         Args:
             interaction: Discord interaction
@@ -51,153 +60,190 @@ class KVKHandler:
             await interaction.followup.send("❌ Kingdom number must be a positive integer.")
             return
 
-        logger.info(f"KVK matches requested for kingdom {kingdom_number} by {user_info} in {guild_info}")
+        logger.info(f"KVK stats requested for kingdom {kingdom_number} by {user_info} in {guild_info}")
 
         try:
-            # Fetch KVK matches from API
-            result = await self._kvk_service.get_kvk_matches(kingdom_number)
+            result = await self._kvk_service.get_kingdom_stats(kingdom_number)
 
             if not result.get("success"):
                 await interaction.followup.send(
-                    f"❌ Failed to fetch KVK matches for Kingdom {kingdom_number}.\n"
+                    f"❌ Failed to fetch KVK stats for Kingdom {kingdom_number}.\n"
                     f"**Error:** {result.get('message', 'Unknown error')}"
                 )
-                logger.warning(f"Failed to fetch KVK matches for kingdom {kingdom_number}: {result.get('message')}")
+                logger.warning(f"Failed to fetch KVK stats for kingdom {kingdom_number}: {result.get('message')}")
                 return
 
-            matches = result.get("data", [])
-            pagination = result.get("pagination", {})
+            stats = result.get("data", {})
+            history = stats.get("history", [])
+            wins = stats.get("wins", 0)
+            losses = stats.get("losses", 0)
+            total = wins + losses
+            computed_win_rate = (wins / total * 100) if total > 0 else 0
+            win_rate = stats.get("winRate", computed_win_rate)
 
-            if not matches:
-                await interaction.followup.send(f"📭 No KVK matches found for Kingdom {kingdom_number}.")
-                return
-
-            # Create main embed
             embed = discord.Embed(
-                title=f"⚔️ KVK Matches - Kingdom {kingdom_number}",
-                description=f"**Total Matches:** {pagination.get('total', len(matches))}",
+                title=f"⚔️ Nexus KVK - Kingdom {kingdom_number}",
+                description=(
+                    f"Tier: **{stats.get('nexusTier', 'N/A')}** | "
+                    f"Stability: **{stats.get('stabilityLabel', 'N/A').title()}**"
+                ),
                 color=discord.Color.red(),
             )
 
-            # Separate matches by result (wins, losses)
-            wins = []
-            losses = []
+            embed.add_field(name="Rank", value=f"#{stats.get('rank', 'N/A')}", inline=True)
+            embed.add_field(name="Rating", value=f"{self._format_float(stats.get('rating'))}", inline=True)
+            embed.add_field(name="Percentile", value=f"{self._format_float(stats.get('percentile'))}%", inline=True)
+            embed.add_field(name="Matches", value=str(stats.get("matchCount", total)), inline=True)
+            embed.add_field(name="W/L", value=f"{wins}/{losses}", inline=True)
+            embed.add_field(name="Win Rate", value=f"{self._format_float(win_rate)}%", inline=True)
 
-            for match in matches:
-                kingdom_a = match.get("kingdom_a")
-                kingdom_b = match.get("kingdom_b")
-                attacker = match.get("attacker")
-                defender = match.get("defender")
-                castle_winner = match.get("castle_winner")
-                prep_winner = match.get("prep_winner")
-                castle_captured = match.get("castle_captured", False)
-                kvk_title = match.get("kvk_title", "Unknown")
-                season_date = match.get("season_date", "N/A")
-
-                # Determine opponent and roles
-                opponent = kingdom_b if kingdom_a == kingdom_number else kingdom_a
-                is_attacker = attacker == kingdom_number
-                is_castle_winner = castle_winner == kingdom_number
-                is_prep_winner = prep_winner == kingdom_number
-
-                # Determine castle phase outcome
-                if is_castle_winner:
-                    castle_result = "🏰 Castle Won"
-                    if castle_captured:
-                        castle_detail = "(Captured)"
-                    else:
-                        castle_detail = "(Defended)"
-                else:
-                    castle_result = "🏰 Castle Lost"
-                    if castle_captured:
-                        castle_detail = "(Castle Fell)"
-                    else:
-                        castle_detail = "(Defended)"
-
-                # Attacker/Defender role
-                role = "⚔️ Attacker" if is_attacker else "🛡️ Defender"
-
-                # Prep phase result
-                prep_result = "🥇 Won Prep" if is_prep_winner else "🥈 Lost Prep"
-
-                match_data = {
-                    "title": kvk_title,
-                    "opponent": opponent,
-                    "date": season_date,
-                    "castle_result": castle_result,
-                    "castle_detail": castle_detail,
-                    "role": role,
-                    "prep_result": prep_result,
-                    "is_castle_winner": is_castle_winner,
-                    "match": match,
-                }
-
-                # Separate by castle phase result
-                if is_castle_winner:
-                    wins.append(match_data)
-                else:
-                    losses.append(match_data)
-
-            # Add wins field
-            if wins:
-                wins_text = []
-                for win in wins[:12]:  # Show first 12
-                    title = win["title"]
-                    opponent = win["opponent"]
-                    date = win["date"]
-                    castle_result = win["castle_result"]
-                    castle_detail = win["castle_detail"]
-                    role = win["role"]
-                    prep_result = win["prep_result"]
-
-                    wins_text.append(
-                        f"✅ **{title}** vs Kingdom {opponent}\n"
-                        f"   ├─ {date} | {role}\n"
-                        f"   ├─ {castle_result} {castle_detail}\n"
-                        f"   └─ {prep_result}"
+            if history:
+                history_lines = []
+                for entry in history[:8]:
+                    kvk_number = entry.get("kvk", "?")
+                    opponent = entry.get("opponent", "?")
+                    result_text = self._format_history_result(entry.get("result"))
+                    rating_change = self._format_signed_float(entry.get("ratingChange"))
+                    history_lines.append(
+                        f"KvK {kvk_number}: vs {opponent} | {result_text} | Rating {rating_change}"
                     )
 
-                wins_str = "\n".join(wins_text)
-                if len(wins) > 12:
-                    wins_str += f"\n*... and {len(wins) - 12} more victories*"
+                embed.add_field(
+                    name="Recent History",
+                    value="\n".join(history_lines),
+                    inline=False,
+                )
 
-                embed.add_field(name=f"✅ Victories ({len(wins)})", value=wins_str, inline=False)
-
-            # Add losses field
-            if losses:
-                losses_text = []
-                for loss in losses[:12]:  # Show first 12
-                    title = loss["title"]
-                    opponent = loss["opponent"]
-                    date = loss["date"]
-                    castle_result = loss["castle_result"]
-                    castle_detail = loss["castle_detail"]
-                    role = loss["role"]
-                    prep_result = loss["prep_result"]
-
-                    losses_text.append(
-                        f"❌ **{title}** vs Kingdom {opponent}\n"
-                        f"   ├─ {date} | {role}\n"
-                        f"   ├─ {castle_result} {castle_detail}\n"
-                        f"   └─ {prep_result}"
-                    )
-
-                losses_str = "\n".join(losses_text)
-                if len(losses) > 12:
-                    losses_str += f"\n*... and {len(losses) - 12} more defeats*"
-
-                embed.add_field(name=f"❌ Defeats ({len(losses)})", value=losses_str, inline=False)
-
-            # Calculate win rate
-            total = len(wins) + len(losses)
-            win_rate = (len(wins) / total * 100) if total > 0 else 0
-            embed.set_footer(
-                text=f"Win Rate: {len(wins)}/{total} ({win_rate:.1f}%) | Data as of {result.get('timestamp', 'N/A')}"
-            )
+            embed.set_footer(text=f"RD: {self._format_float(stats.get('rd'))} | Volatility: {self._format_float(stats.get('vol'))}")
 
             await interaction.followup.send(embed=embed)
-            logger.info(f"Successfully listed {len(matches)} KVK matches for kingdom {kingdom_number}")
+            logger.info(f"Successfully sent KVK stats for kingdom {kingdom_number}")
 
         except Exception as e:
-            logger.error(f"Error fetching KVK matches for kingdom {kingdom_number}: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while fetching KVK matches. Please try again later.")
+            logger.error(f"Error fetching KVK stats for kingdom {kingdom_number}: {e}", exc_info=True)
+            await interaction.followup.send("❌ An error occurred while fetching KVK stats. Please try again later.")
+
+    async def _handle_compare_kvk_slash(self, interaction: discord.Interaction, kingdom_a: int, kingdom_b: int):
+        """Handle comparing Nexus KVK stats for two kingdoms."""
+        await interaction.response.defer(thinking=True)
+
+        if kingdom_a <= 0 or kingdom_b <= 0:
+            await interaction.followup.send("❌ Kingdom numbers must be positive integers.")
+            return
+
+        if kingdom_a == kingdom_b:
+            await interaction.followup.send("❌ Please provide two different kingdoms to compare.")
+            return
+
+        logger.info(f"KVK comparison requested for kingdoms {kingdom_a} vs {kingdom_b}")
+
+        try:
+            result = await self._kvk_service.compare_kingdoms(kingdom_a, kingdom_b)
+            if not result.get("success"):
+                await interaction.followup.send(
+                    "❌ Failed to compare kingdoms.\n"
+                    f"**Error:** {result.get('message', 'Unknown error')}"
+                )
+                return
+
+            data = result.get("data", {})
+            stats_a = data.get("kingdom_a", {})
+            stats_b = data.get("kingdom_b", {})
+            score = data.get("score", {})
+
+            score_a = score.get(str(kingdom_a), 0)
+            score_b = score.get(str(kingdom_b), 0)
+
+            if score_a > score_b:
+                verdict = f"Kingdom {kingdom_a} leads ({score_a}-{score_b})"
+            elif score_b > score_a:
+                verdict = f"Kingdom {kingdom_b} leads ({score_b}-{score_a})"
+            else:
+                verdict = f"Dead heat ({score_a}-{score_b})"
+
+            embed = discord.Embed(
+                title=f"⚔️ KvK Compare: {kingdom_a} vs {kingdom_b}",
+                description=verdict,
+                color=discord.Color.gold(),
+            )
+
+            embed.add_field(
+                name=f"Kingdom {kingdom_a}",
+                value=self._build_compact_stats(stats_a),
+                inline=True,
+            )
+            embed.add_field(
+                name=f"Kingdom {kingdom_b}",
+                value=self._build_compact_stats(stats_b),
+                inline=True,
+            )
+
+            metrics = [
+                ("Rating", stats_a.get("rating"), stats_b.get("rating")),
+                ("Rank", stats_a.get("rank"), stats_b.get("rank")),
+                ("Win Rate", stats_a.get("winRate"), stats_b.get("winRate")),
+                ("Wins", stats_a.get("wins"), stats_b.get("wins")),
+                ("Losses", stats_a.get("losses"), stats_b.get("losses")),
+                ("Percentile", stats_a.get("percentile"), stats_b.get("percentile")),
+            ]
+
+            comparison_lines = []
+            for metric, value_a, value_b in metrics:
+                comparison_lines.append(
+                    f"{metric}: {self._format_metric(metric, value_a)} vs {self._format_metric(metric, value_b)}"
+                )
+
+            embed.add_field(name="Head-to-Head Metrics", value="\n".join(comparison_lines), inline=False)
+
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Successfully compared kingdoms {kingdom_a} and {kingdom_b}")
+        except Exception as e:
+            logger.error(f"Error comparing kingdoms {kingdom_a} vs {kingdom_b}: {e}", exc_info=True)
+            await interaction.followup.send("❌ An error occurred while comparing kingdoms. Please try again later.")
+
+    @staticmethod
+    def _format_float(value: Any) -> str:
+        """Format numbers with two decimals when possible."""
+        try:
+            return f"{float(value):.2f}"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    @staticmethod
+    def _format_signed_float(value: Any) -> str:
+        """Format signed numeric values with two decimals."""
+        try:
+            return f"{float(value):+,.2f}"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _build_compact_stats(self, stats: Dict[str, Any]) -> str:
+        """Build compact per-kingdom comparison lines."""
+        return (
+            f"Tier: {stats.get('nexusTier', 'N/A')}\n"
+            f"Rank: #{stats.get('rank', 'N/A')}\n"
+            f"Rating: {self._format_float(stats.get('rating'))}\n"
+            f"W/L: {stats.get('wins', 'N/A')}/{stats.get('losses', 'N/A')}\n"
+            f"Win Rate: {self._format_float(stats.get('winRate'))}%"
+        )
+
+    def _format_metric(self, metric: str, value: Any) -> str:
+        """Format metric values for compare output."""
+        if metric in {"Rating", "Percentile", "Win Rate"}:
+            suffix = "%" if metric in {"Percentile", "Win Rate"} else ""
+            return f"{self._format_float(value)}{suffix}"
+        if metric == "Rank":
+            return f"#{value}" if value is not None else "N/A"
+        return str(value) if value is not None else "N/A"
+
+    @staticmethod
+    def _format_history_result(result: Any) -> str:
+        """Normalize history result labels from Nexus API."""
+        normalized = str(result or "Unknown").strip().lower()
+        if normalized == "preparation":
+            return "Preparation (Prep Win, Battle Loss)"
+        if normalized == "win":
+            return "Win"
+        if normalized == "loss":
+            return "Loss"
+        return str(result or "Unknown")
