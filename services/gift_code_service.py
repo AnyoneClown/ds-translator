@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import GiftCodeRedemption
-
 from services.kingshot_api import KingshotAPIClient
 
 logger = logging.getLogger(__name__)
@@ -159,9 +158,9 @@ class GiftCodeService(IGiftCodeService):
         payload = {"playerId": player_id, "giftCode": gift_code}
 
         try:
-            # Ensure client is available 
+            # Ensure client is available
             api_client = await self.ensure_client()
-            
+
             # The API requires an active session with cookies from the get_player call
             # Otherwise we'll receive a 'NOT LOGIN' error during redemption
             player_resp = await api_client.get_player(str(player_id))
@@ -182,7 +181,7 @@ class GiftCodeService(IGiftCodeService):
                 }
             else:
                 err_code = str(response_data.get("err_code", ""))
-                
+
                 # Check if the error indicates the code was already redeemed
                 already_redeemed_phrases = [
                     "already redeemed",
@@ -194,7 +193,7 @@ class GiftCodeService(IGiftCodeService):
                     "collected",
                     "same type exchange",
                     "time error",
-                    "received."
+                    "received.",
                 ]
                 is_already_redeemed = any(phrase in msg.lower() for phrase in already_redeemed_phrases)
 
@@ -212,8 +211,7 @@ class GiftCodeService(IGiftCodeService):
                     }
 
                 logger.warning(
-                    f"Failed to redeem gift code '{gift_code}' for player {player_id}: "
-                    f"{msg} (code: {err_code})"
+                    f"Failed to redeem gift code '{gift_code}' for player {player_id}: " f"{msg} (code: {err_code})"
                 )
 
                 return {
@@ -247,12 +245,12 @@ class GiftCodeService(IGiftCodeService):
     async def get_available_gift_codes(self) -> Dict[str, Any]:
         """
         Get available gift codes from kingshot.net API.
-        
+
         Returns:
             Dictionary containing the API response with status and giftcodes
         """
         url = "https://kingshot.net/api/gift-codes"
-        
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -262,24 +260,24 @@ class GiftCodeService(IGiftCodeService):
                             "success": False,
                             "message": f"HTTP Error {response.status}",
                         }
-                    
+
                     data = await response.json()
-                    
+
                     if data.get("status") != "success":
                         logger.error(f"kingshot.net API returned non-success status: {data.get('status')}")
                         return {
                             "success": False,
                             "message": data.get("message", "API Error"),
                         }
-                    
+
                     codes = data.get("data", {}).get("giftCodes", [])
                     logger.info(f"Successfully fetched {len(codes)} gift codes from kingshot.net")
-                    
+
                     return {
                         "success": True,
                         "data": codes,
                     }
-                    
+
         except asyncio.TimeoutError:
             logger.error("Timeout fetching gift codes from kingshot.net")
             return {

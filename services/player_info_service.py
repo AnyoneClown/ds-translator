@@ -51,7 +51,7 @@ class PlayerInfoService(IPlayerInfoService):
                             "playerId": str(raw_data.get("fid", player_id)),
                             "level": raw_data.get("stove_lv"),
                             "kingdom": raw_data.get("kid"),
-                            "profilePhoto": raw_data.get("avatar_image")
+                            "profilePhoto": raw_data.get("avatar_image"),
                         }
                         logger.info(
                             f"Successfully fetched player info for ID {player_id}: "

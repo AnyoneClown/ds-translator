@@ -1,7 +1,7 @@
+import asyncio
 import hashlib
 import time
 import urllib.parse
-import asyncio
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -69,7 +69,7 @@ class KingshotAPIClient:
                             await asyncio.sleep(2 * (attempt + 1))
                             continue
                         return {"code": 1, "msg": "API rate limit exceeded (429 Too Many Requests).", "err_code": 429}
-                    
+
                     try:
                         # E.g. {'code': 1, 'msg': 'role not exist.', 'data': [], 'err_code': 40004}
                         return await response.json()
@@ -85,7 +85,7 @@ class KingshotAPIClient:
                 raise ValueError(f"HTTP request failed: {e}") from e
             except Exception as e:
                 raise ValueError(f"Unexpected request error: {e}") from e
-        
+
         return {"code": 1, "msg": "Max retries exceeded.", "err_code": 500}
 
     async def get_player(self, player_id: str) -> Dict[str, Any]:

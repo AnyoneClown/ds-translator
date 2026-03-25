@@ -12,7 +12,6 @@ class BotConfig:
 
     discord_token: str
     database_url: str
-    ocr_api_key: str
     command_prefix: str = "!"
     translator_role_name: str = "Translator"
     banned_players: set = None
@@ -38,32 +37,31 @@ class BotConfig:
         if not database_url:
             raise ValueError("COCKROACHDB_URL not found in environment variables")
 
-        ocr_api_key = os.getenv("KOLOSAL_OCR_API_KEY")
-        if not ocr_api_key:
-            raise ValueError("KOLOSAL_OCR_API_KEY not found in environment variables")
-
         # Parse banned players from environment variable (comma-separated user IDs)
         banned_players_str = os.getenv("BANNED_PLAYERS", "")
         banned_players = set()
         if banned_players_str.strip():
             try:
-                banned_players = set(int(user_id.strip()) for user_id in banned_players_str.split(",") if user_id.strip())
+                banned_players = set(
+                    int(user_id.strip()) for user_id in banned_players_str.split(",") if user_id.strip()
+                )
             except ValueError:
                 raise ValueError("BANNED_PLAYERS must contain comma-separated user IDs (integers)")
-                
+
         # Parse auto redeem announcement channels from environment variable (comma-separated channel IDs)
         auto_redeem_channels_str = os.getenv("AUTO_REDEEM_CHANNELS", "")
         auto_redeem_channels = set()
         if auto_redeem_channels_str.strip():
             try:
-                auto_redeem_channels = set(int(channel_id.strip()) for channel_id in auto_redeem_channels_str.split(",") if channel_id.strip())
+                auto_redeem_channels = set(
+                    int(channel_id.strip()) for channel_id in auto_redeem_channels_str.split(",") if channel_id.strip()
+                )
             except ValueError:
                 raise ValueError("AUTO_REDEEM_CHANNELS must contain comma-separated channel IDs (integers)")
 
         return cls(
             discord_token=discord_token,
             database_url=database_url,
-            ocr_api_key=ocr_api_key,
             command_prefix=os.getenv("COMMAND_PREFIX", "!"),
             translator_role_name=os.getenv("TRANSLATOR_ROLE", "Translator"),
             banned_players=banned_players,

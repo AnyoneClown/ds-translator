@@ -378,7 +378,7 @@ class DatabaseService:
             Tuple of (is_new, GiftCode)
         """
         from db.models import GiftCode
-        
+
         result = await session.execute(select(GiftCode).where(GiftCode.id == code_id))
         existing_code = result.scalar_one_or_none()
 
@@ -396,21 +396,19 @@ class DatabaseService:
             session.add(new_code)
             logger.info(f"Added new tracked gift code: {code} (ID: {code_id})")
             return True, new_code
-            
+
     @staticmethod
     async def get_all_gift_codes(session: AsyncSession) -> list["GiftCode"]:
         """
         Get all tracked gift codes.
-        
+
         Args:
             session: Database session
-            
+
         Returns:
             List of GiftCode objects
         """
         from db.models import GiftCode
-        
-        result = await session.execute(
-            select(GiftCode).order_by(GiftCode.created_at_api.desc())
-        )
+
+        result = await session.execute(select(GiftCode).order_by(GiftCode.created_at_api.desc()))
         return list(result.scalars().all())
