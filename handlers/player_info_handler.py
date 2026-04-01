@@ -56,7 +56,16 @@ class PlayerInfoHandler:
 
             if player_data is None:
                 logger.warning(f"Player {player_id} not found for request by {user_info}")
-                await interaction.followup.send(f"❌ Could not find player with ID: `{player_id}`")
+                not_found_embed = discord.Embed(
+                    title="❌ Player Not Found",
+                    description=(
+                        f"Could not find a player with ID `{player_id}`.\n"
+                        "Please verify the ID in-game and try again."
+                    ),
+                    color=discord.Color.red(),
+                )
+                not_found_embed.set_footer(text="Tip: You can add a valid player later with /addplayer")
+                await interaction.followup.send(embed=not_found_embed)
 
                 # Track failed lookup in database
                 try:
@@ -95,16 +104,28 @@ class PlayerInfoHandler:
                 color=discord.Color.blue(),
             )
 
+            embed.add_field(name="Player ID", value=f"`{player_data.get('playerId', player_id)}`", inline=True)
+            embed.add_field(
+                name="Kingdom",
+                value=str(player_data.get("kingdom", "N/A")),
+                inline=True,
+            )
+            embed.add_field(
+                name="Castle Level",
+                value=str(player_data.get("levelRenderedDetailed") or player_data.get("level") or "N/A"),
+                inline=True,
+            )
+
             # Add profile photo if available
             if "profilePhoto" in player_data and player_data["profilePhoto"]:
                 embed.set_thumbnail(url=player_data["profilePhoto"])
 
-            embed.set_footer(text="Data from kingshot.net API")
+            embed.set_footer(text="Data from kingshot.net API • Use /addplayer to include this player in auto-redeem")
 
             await interaction.followup.send(embed=embed)
             logger.info(f"Successfully displayed stats for {player_name} (ID: {player_id}) to {user_info}")
 
-            # Track in database
+            # Sync player profile in the unified player table
             try:
                 db = get_db()
                 async with db.session() as session:
@@ -116,29 +137,39 @@ class PlayerInfoHandler:
                         interaction.user.discriminator,
                         interaction.user.display_name,
                     )
-                    # Log the successful player lookup with kingdom and castle level
+                    resolved_player_id = str(player_data.get("playerId") or player_id)
+                    resolved_kingdom = (
+                        str(player_data.get("kingdom")) if player_data.get("kingdom") is not None else None
+                    )
+                    resolved_castle_level = (
+                        str(player_data.get("levelRenderedDetailed") or player_data.get("level"))
+                        if (player_data.get("levelRenderedDetailed") or player_data.get("level") is not None)
+                        else None
+                    )
+
+                    # Upsert canonical player ID from API response.
                     await DatabaseService.log_player_lookup(
                         session,
                         user_id=interaction.user.id,
-                        player_id=player_id,
+                        player_id=resolved_player_id,
                         player_name=player_name,
-                        kingdom=(str(player_data.get("kingdom")) if player_data.get("kingdom") else None),
-                        castle_level=player_data.get("levelRenderedDetailed"),
+                        kingdom=resolved_kingdom,
+                        castle_level=resolved_castle_level,
                         success=True,
                         guild_id=interaction.guild_id,
                         channel_id=interaction.channel_id,
                     )
-                    await DatabaseService.update_registered_player_metadata(
-                        session,
-                        player_id=str(player_data.get("playerId") or player_id),
-                        player_name=player_name,
-                        kingdom=(str(player_data.get("kingdom")) if player_data.get("kingdom") is not None else None),
-                        castle_level=(
-                            str(player_data.get("levelRenderedDetailed") or player_data.get("level"))
-                            if (player_data.get("levelRenderedDetailed") or player_data.get("level") is not None)
-                            else None
-                        ),
-                    )
+
+                    # Update legacy non-canonical records only if they already exist.
+                    if resolved_player_id != str(player_id):
+                        await DatabaseService.update_registered_player_metadata(
+                            session,
+                            player_id=str(player_id),
+                            player_name=player_name,
+                            kingdom=resolved_kingdom,
+                            castle_level=resolved_castle_level,
+                        )
+
                     logger.debug(f"Tracked player stats request by user {interaction.user.id}")
             except Exception as db_error:
                 logger.error(f"Database tracking error: {db_error}", exc_info=True)
@@ -148,4 +179,10 @@ class PlayerInfoHandler:
                 f"Error handling stats command for player {player_id} by {user_info}: {e}",
                 exc_info=True,
             )
-            await interaction.followup.send(f"❌ An error occurred while fetching player stats: {str(e)}")
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="❌ Unexpected Error",
+                    description="An error occurred while fetching player stats. Please try again later.",
+                    color=discord.Color.red(),
+                )
+            )

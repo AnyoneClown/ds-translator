@@ -33,7 +33,6 @@ class User(Base):
 
     # Relationships
     translation_logs: Mapped[List["TranslationLog"]] = relationship("TranslationLog", back_populates="user")
-    player_lookups: Mapped[List["PlayerLookupLog"]] = relationship("PlayerLookupLog", back_populates="user")
     gift_code_redemptions: Mapped[List["GiftCodeRedemption"]] = relationship(
         "GiftCodeRedemption", back_populates="user"
     )
@@ -75,38 +74,8 @@ class TranslationLog(Base):
         return f"<TranslationLog(id={self.id}, user_id={self.user_id}, target_language={self.target_language})>"
 
 
-class PlayerLookupLog(Base):
-    """Log of all player stats lookups."""
-
-    __tablename__ = "player_lookup_logs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    guild_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    kingshot_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    kingshot_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    kingdom: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    castle_level: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    success: Mapped[bool] = mapped_column(default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
-    )
-
-    # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="player_lookups")
-
-    def __repr__(self) -> str:
-        return f"<PlayerLookupLog(id={self.id}, user_id={self.user_id}, player_id={self.kingshot_id})>"
-
-
 class RegisteredPlayer(Base):
-    """Players registered for automatic gift code redemption."""
+    """Unified player profile table for all known players."""
 
     __tablename__ = "registered_players"
 

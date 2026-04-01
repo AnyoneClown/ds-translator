@@ -57,7 +57,13 @@ class KVKHandler:
         guild_info = f"{interaction.guild.name} (ID: {interaction.guild.id})" if interaction.guild else "DM"
 
         if kingdom_number <= 0:
-            await interaction.followup.send("❌ Kingdom number must be a positive integer.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="⚠️ Invalid Kingdom Number",
+                    description="Kingdom number must be a positive integer.",
+                    color=discord.Color.orange(),
+                )
+            )
             return
 
         logger.info(f"KVK stats requested for kingdom {kingdom_number} by {user_info} in {guild_info}")
@@ -66,10 +72,14 @@ class KVKHandler:
             result = await self._kvk_service.get_kingdom_stats(kingdom_number)
 
             if not result.get("success"):
-                await interaction.followup.send(
-                    f"❌ Failed to fetch KVK stats for Kingdom {kingdom_number}.\n"
-                    f"**Error:** {result.get('message', 'Unknown error')}"
+                embed = self._build_status_embed(
+                    title=f"❌ Could Not Fetch Kingdom {kingdom_number}",
+                    description="The Nexus API request failed.",
+                    color=discord.Color.red(),
                 )
+                embed.add_field(name="Details", value=result.get("message", "Unknown error"), inline=False)
+                embed.set_footer(text="Try again in a moment or verify the kingdom number")
+                await interaction.followup.send(embed=embed)
                 logger.warning(f"Failed to fetch KVK stats for kingdom {kingdom_number}: {result.get('message')}")
                 return
 
@@ -113,26 +123,51 @@ class KVKHandler:
                     value="\n".join(history_lines),
                     inline=False,
                 )
+            else:
+                embed.add_field(name="Recent History", value="No recent history available.", inline=False)
 
-            embed.set_footer(text=f"RD: {self._format_float(stats.get('rd'))} | Volatility: {self._format_float(stats.get('vol'))}")
+            embed.set_footer(
+                text=(
+                    f"RD: {self._format_float(stats.get('rd'))} | "
+                    f"Volatility: {self._format_float(stats.get('vol'))} | Use /kvk_compare to compare kingdoms"
+                )
+            )
 
             await interaction.followup.send(embed=embed)
             logger.info(f"Successfully sent KVK stats for kingdom {kingdom_number}")
 
         except Exception as e:
             logger.error(f"Error fetching KVK stats for kingdom {kingdom_number}: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while fetching KVK stats. Please try again later.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Unexpected Error",
+                    description="An error occurred while fetching KVK stats. Please try again later.",
+                    color=discord.Color.red(),
+                )
+            )
 
     async def _handle_compare_kvk_slash(self, interaction: discord.Interaction, kingdom_a: int, kingdom_b: int):
         """Handle comparing Nexus KVK stats for two kingdoms."""
         await interaction.response.defer(thinking=True)
 
         if kingdom_a <= 0 or kingdom_b <= 0:
-            await interaction.followup.send("❌ Kingdom numbers must be positive integers.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="⚠️ Invalid Kingdom Numbers",
+                    description="Both kingdom numbers must be positive integers.",
+                    color=discord.Color.orange(),
+                )
+            )
             return
 
         if kingdom_a == kingdom_b:
-            await interaction.followup.send("❌ Please provide two different kingdoms to compare.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="⚠️ Duplicate Kingdom",
+                    description="Please provide two different kingdoms to compare.",
+                    color=discord.Color.orange(),
+                )
+            )
             return
 
         logger.info(f"KVK comparison requested for kingdoms {kingdom_a} vs {kingdom_b}")
@@ -140,10 +175,13 @@ class KVKHandler:
         try:
             result = await self._kvk_service.compare_kingdoms(kingdom_a, kingdom_b)
             if not result.get("success"):
-                await interaction.followup.send(
-                    "❌ Failed to compare kingdoms.\n"
-                    f"**Error:** {result.get('message', 'Unknown error')}"
+                embed = self._build_status_embed(
+                    title="❌ Comparison Failed",
+                    description="Could not compare the selected kingdoms.",
+                    color=discord.Color.red(),
                 )
+                embed.add_field(name="Details", value=result.get("message", "Unknown error"), inline=False)
+                await interaction.followup.send(embed=embed)
                 return
 
             data = result.get("data", {})
@@ -194,12 +232,24 @@ class KVKHandler:
                 )
 
             embed.add_field(name="Head-to-Head Metrics", value="\n".join(comparison_lines), inline=False)
+            embed.set_footer(text="Tip: Use /kvk for deeper details on one kingdom")
 
             await interaction.followup.send(embed=embed)
             logger.info(f"Successfully compared kingdoms {kingdom_a} and {kingdom_b}")
         except Exception as e:
             logger.error(f"Error comparing kingdoms {kingdom_a} vs {kingdom_b}: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while comparing kingdoms. Please try again later.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Unexpected Error",
+                    description="An error occurred while comparing kingdoms. Please try again later.",
+                    color=discord.Color.red(),
+                )
+            )
+
+    @staticmethod
+    def _build_status_embed(title: str, description: str, color: discord.Color) -> discord.Embed:
+        """Build consistent response embeds for KVK commands."""
+        return discord.Embed(title=title, description=description, color=color)
 
     @staticmethod
     def _format_float(value: Any) -> str:

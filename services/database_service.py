@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import GiftCode, GiftCodeRedemption, PlayerLookupLog, RegisteredPlayer, TranslationLog, User
+from db.models import GiftCode, GiftCodeRedemption, RegisteredPlayer, TranslationLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,51 @@ class DatabaseService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def _upsert_player_profile(
+        session: AsyncSession,
+        player_id: str,
+        player_name: Optional[str] = None,
+        kingdom: Optional[str] = None,
+        castle_level: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        added_by_user_id: Optional[int] = None,
+        overwrite_owner: bool = False,
+    ) -> Optional[RegisteredPlayer]:
+        """Create or update a player profile in the unified player table."""
+        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
+        player = result.scalar_one_or_none()
+
+        if player:
+            if player_name:
+                player.player_name = player_name
+            if kingdom is not None:
+                player.kingdom = kingdom
+            if castle_level is not None:
+                player.castle_level = castle_level
+            if enabled is not None:
+                player.enabled = enabled
+            if overwrite_owner and added_by_user_id is not None:
+                player.added_by_user_id = added_by_user_id
+
+            await session.flush()
+            return player
+
+        if added_by_user_id is None:
+            return None
+
+        player = RegisteredPlayer(
+            player_id=player_id,
+            player_name=player_name,
+            kingdom=kingdom,
+            castle_level=castle_level,
+            enabled=(enabled if enabled is not None else False),
+            added_by_user_id=added_by_user_id,
+        )
+        session.add(player)
+        await session.flush()
+        return player
+
+    @staticmethod
     async def log_player_lookup(
         session: AsyncSession,
         user_id: int,
@@ -132,9 +177,9 @@ class DatabaseService:
         success: bool = True,
         guild_id: Optional[int] = None,
         channel_id: Optional[int] = None,
-    ) -> PlayerLookupLog:
+    ) -> Optional[RegisteredPlayer]:
         """
-        Log a player stats lookup to the database.
+        Sync a player lookup into the unified player table.
 
         Args:
             session: Database session
@@ -144,26 +189,31 @@ class DatabaseService:
             kingdom: Player's kingdom (if found)
             castle_level: Player's castle level (if found)
             success: Whether the lookup was successful
-            guild_id: Discord guild ID (optional)
-            channel_id: Discord channel ID (optional)
+            guild_id: Unused, kept for backward compatibility
+            channel_id: Unused, kept for backward compatibility
 
         Returns:
-            PlayerLookupLog object
+            RegisteredPlayer object when upserted, else None
         """
-        log = PlayerLookupLog(
-            user_id=user_id,
-            kingshot_id=player_id,
-            kingshot_name=player_name,
+        # Keep arguments referenced so linters don't flag intentionally retained compatibility args.
+        _ = guild_id
+        _ = channel_id
+
+        if not success:
+            logger.info(f"Player lookup failed for {player_id}; no player profile upsert performed")
+            return None
+
+        player = await DatabaseService._upsert_player_profile(
+            session=session,
+            player_id=player_id,
+            player_name=player_name,
             kingdom=kingdom,
             castle_level=castle_level,
-            success=success,
-            guild_id=guild_id,
-            channel_id=channel_id,
+            added_by_user_id=user_id,
         )
-        session.add(log)
-        await session.flush()
-        logger.info(f"Logged player lookup by user {user_id}: player {player_id} (success={success})")
-        return log
+        if player:
+            logger.info(f"Synced player lookup by user {user_id}: player {player_id}")
+        return player
 
     @staticmethod
     async def log_gift_code_redemption(
@@ -237,37 +287,21 @@ class DatabaseService:
         Returns:
             RegisteredPlayer object
         """
-        # Check if player already exists
-        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
-        existing_player = result.scalar_one_or_none()
+        player = await DatabaseService._upsert_player_profile(
+            session=session,
+            player_id=player_id,
+            player_name=player_name,
+            kingdom=kingdom,
+            castle_level=castle_level,
+            enabled=enabled,
+            added_by_user_id=added_by_user_id,
+            overwrite_owner=True,
+        )
+        if player is None:
+            raise ValueError("Unable to upsert registered player")
 
-        if existing_player:
-            # Update existing player
-            existing_player.enabled = enabled
-            if player_name:
-                existing_player.player_name = player_name
-            if kingdom is not None:
-                existing_player.kingdom = kingdom
-            if castle_level is not None:
-                existing_player.castle_level = castle_level
-            existing_player.added_by_user_id = added_by_user_id
-            await session.flush()
-            logger.info(f"Updated registered player {player_id} (enabled={enabled})")
-            return existing_player
-        else:
-            # Create new registered player
-            player = RegisteredPlayer(
-                player_id=player_id,
-                player_name=player_name,
-                kingdom=kingdom,
-                castle_level=castle_level,
-                enabled=enabled,
-                added_by_user_id=added_by_user_id,
-            )
-            session.add(player)
-            await session.flush()
-            logger.info(f"Added new registered player {player_id} by user {added_by_user_id}")
-            return player
+        logger.info(f"Upserted registered player {player_id} (enabled={enabled})")
+        return player
 
     @staticmethod
     async def get_registered_players(
@@ -318,7 +352,7 @@ class DatabaseService:
         player_id: str,
     ) -> bool:
         """
-        Remove a registered player.
+        Remove a player profile.
 
         Args:
             session: Database session
@@ -373,23 +407,21 @@ class DatabaseService:
         player_name: Optional[str] = None,
         kingdom: Optional[str] = None,
         castle_level: Optional[str] = None,
+        added_by_user_id: Optional[int] = None,
     ) -> bool:
-        """Update metadata for an existing registered player if present."""
-        result = await session.execute(select(RegisteredPlayer).where(RegisteredPlayer.player_id == player_id))
-        player = result.scalar_one_or_none()
-
+        """Update metadata for a player, creating a disabled profile if user context is provided."""
+        player = await DatabaseService._upsert_player_profile(
+            session=session,
+            player_id=player_id,
+            player_name=player_name,
+            kingdom=kingdom,
+            castle_level=castle_level,
+            added_by_user_id=added_by_user_id,
+        )
         if not player:
             return False
 
-        if player_name:
-            player.player_name = player_name
-        if kingdom is not None:
-            player.kingdom = kingdom
-        if castle_level is not None:
-            player.castle_level = castle_level
-
-        await session.flush()
-        logger.debug("Refreshed metadata for registered player %s", player_id)
+        logger.debug("Refreshed metadata for player %s", player_id)
         return True
 
     @staticmethod

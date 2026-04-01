@@ -10,6 +10,7 @@ A Discord bot focused on translation, scheduling, player lookup, KVK tracking, a
 - Player info lookups and KVK command support.
 - Gift code polling and auto-redemption for registered players.
 - Paginated player list output for large registrations.
+- Unified player profile storage in a single players table.
 - Clear redemption result categories:
     - Success
     - Already redeemed
@@ -76,6 +77,7 @@ Gift code related commands include:
 - /addplayer
 - /removeplayer
 - /listplayers
+- /playerlist (alias)
 - /giftcodes
 - /toggleplayer
 

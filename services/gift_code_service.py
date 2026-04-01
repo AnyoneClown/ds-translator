@@ -141,6 +141,19 @@ class GiftCodeService(IGiftCodeService):
         # Check if already redeemed
         existing_redemption = await self.check_already_redeemed(session, player_id, gift_code)
         if existing_redemption:
+            player_profile: Optional[Dict[str, Any]] = None
+            try:
+                api_client = await self.ensure_client()
+                player_resp = await api_client.get_player(str(player_id))
+                player_profile = self._extract_player_profile(player_resp, str(player_id))
+            except Exception as lookup_error:
+                logger.debug(
+                    "Skipping player metadata refresh for already-redeemed code '%s' and player %s: %s",
+                    gift_code,
+                    player_id,
+                    lookup_error,
+                )
+
             logger.info(
                 f"Gift code '{gift_code}' already redeemed for player {player_id} at {existing_redemption.created_at}. "
                 f"Skipping API call."
@@ -151,11 +164,11 @@ class GiftCodeService(IGiftCodeService):
                 "error_code": "ALREADY_REDEEMED",
                 "already_redeemed": True,
                 "redeemed_at": existing_redemption.created_at.isoformat(),
+                "player_profile": player_profile,
             }
 
         logger.info(f"Redeeming gift code '{gift_code}' for player ID: {player_id}")
-
-        payload = {"playerId": player_id, "giftCode": gift_code}
+        player_profile: Optional[Dict[str, Any]] = None
 
         try:
             # Ensure client is available
@@ -164,6 +177,7 @@ class GiftCodeService(IGiftCodeService):
             # The API requires an active session with cookies from the get_player call
             # Otherwise we'll receive a 'NOT LOGIN' error during redemption
             player_resp = await api_client.get_player(str(player_id))
+            player_profile = self._extract_player_profile(player_resp, str(player_id))
             if player_resp.get("code") != 0:
                 logger.warning(f"Failed to get_player before redeeming for {player_id}: {player_resp}")
 
@@ -178,6 +192,7 @@ class GiftCodeService(IGiftCodeService):
                     "success": True,
                     "message": msg,
                     "data": response_data.get("data"),
+                    "player_profile": player_profile,
                 }
             else:
                 err_code = str(response_data.get("err_code", ""))
@@ -208,6 +223,7 @@ class GiftCodeService(IGiftCodeService):
                         "error_code": "ALREADY_REDEEMED_BY_API",  # Special code to identify and skip next time
                         "error_details": {"err_code": err_code},
                         "already_redeemed_by_api": True,
+                        "player_profile": player_profile,
                     }
 
                 logger.warning(
@@ -219,6 +235,7 @@ class GiftCodeService(IGiftCodeService):
                     "message": msg,
                     "error_code": err_code,
                     "error_details": {"err_code": err_code},
+                    "player_profile": player_profile,
                 }
 
         except ValueError as e:
@@ -230,6 +247,7 @@ class GiftCodeService(IGiftCodeService):
                 "success": False,
                 "message": "Error communicating with the API.",
                 "error_code": "API_ERROR",
+                "player_profile": player_profile,
             }
         except Exception as e:
             logger.error(
@@ -240,7 +258,25 @@ class GiftCodeService(IGiftCodeService):
                 "success": False,
                 "message": "An unexpected error occurred.",
                 "error_code": "UNEXPECTED_ERROR",
+                "player_profile": player_profile,
             }
+
+    @staticmethod
+    def _extract_player_profile(player_resp: Dict[str, Any], fallback_player_id: str) -> Optional[Dict[str, Any]]:
+        """Normalize get_player API data into the internal player metadata shape."""
+        if not isinstance(player_resp, dict) or player_resp.get("code") != 0:
+            return None
+
+        raw_data = player_resp.get("data") or {}
+        if not isinstance(raw_data, dict):
+            return None
+
+        return {
+            "playerId": str(raw_data.get("fid") or fallback_player_id),
+            "name": raw_data.get("nickname"),
+            "kingdom": raw_data.get("kid"),
+            "level": raw_data.get("stove_lv"),
+        }
 
     async def get_available_gift_codes(self) -> Dict[str, Any]:
         """

@@ -106,16 +106,19 @@ class TranslatorBot:
                 logger.warning(f"Unknown command attempted by {ctx.author}: {ctx.message.content}")
             elif isinstance(error, commands.MissingRequiredArgument):
                 logger.warning(f"Missing argument for command by {ctx.author}: {ctx.command}")
-                await ctx.send(f"❌ Missing required argument: {error.param.name}")
+                await ctx.send(
+                    f"❌ Missing required argument: `{error.param.name}`. "
+                    f"Use `!help {ctx.command}` to see command usage."
+                )
             elif isinstance(error, commands.BadArgument):
                 logger.warning(f"Bad argument for command by {ctx.author}: {ctx.command} - {error}")
-                await ctx.send("❌ Invalid argument provided")
+                await ctx.send("❌ Invalid argument provided. Please check command format with `!help`.")
             else:
                 logger.error(
                     f"Command error in {ctx.command} by {ctx.author}: {error}",
                     exc_info=error,
                 )
-                await ctx.send("❌ An error occurred while processing the command")
+                await ctx.send("❌ An unexpected error occurred while processing the command.")
 
         @self.bot.event
         async def on_guild_join(guild):

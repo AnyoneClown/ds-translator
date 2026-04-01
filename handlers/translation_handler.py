@@ -64,11 +64,11 @@ class TranslationHandler:
         """Handle translation to a specific language command."""
         # Check if user is banned from translation
         if self._config and ctx.author.id in self._config.banned_players:
-            await ctx.reply("You are banned from using translation commands.")
+            await ctx.reply("⛔ You are currently blocked from using translation commands.")
             return
 
         if not ctx.message.reference:
-            await ctx.reply("You need to reply to a message to use this command.")
+            await ctx.reply("💬 Reply to a message first, then use this command (example: `!t spanish`).")
             return
 
         try:
@@ -76,7 +76,7 @@ class TranslationHandler:
             text_to_translate = original_message.content
 
             if not text_to_translate:
-                await ctx.reply("The replied-to message is empty.")
+                await ctx.reply("⚠️ The replied-to message is empty.")
                 return
 
             async with ctx.typing():
@@ -84,7 +84,12 @@ class TranslationHandler:
 
             if result:
                 translated_text = result.get("text")
-                await ctx.reply(f"Translated to {target_language}:\n> {translated_text}")
+                if not translated_text:
+                    await ctx.reply("❌ Translation completed but no text was returned.")
+                    return
+
+                quoted_text = self._as_quote_block(self._truncate_for_discord(translated_text, 1500))
+                await ctx.reply(f"🌐 **Translated to {target_language}**\n{quoted_text}")
 
                 # Track in database
                 try:
@@ -111,20 +116,20 @@ class TranslationHandler:
                 except Exception as db_error:
                     logger.error(f"Database tracking error: {db_error}", exc_info=True)
             else:
-                await ctx.reply(f"Sorry, I couldn't translate that to {target_language}.")
+                await ctx.reply(f"❌ I couldn't translate that to {target_language}. Try a different language name.")
         except Exception as e:
             logger.error(f"Error in translate command: {e}")
-            await ctx.reply("An error occurred while processing your request.")
+            await ctx.reply("❌ An error occurred while processing your translation request.")
 
     async def _handle_translate_to_english(self, ctx):
         """Handle translation to English command."""
         # Check if user is banned from translation
         if self._config and ctx.author.id in self._config.banned_players:
-            await ctx.reply("You are banned from using translation commands.")
+            await ctx.reply("⛔ You are currently blocked from using translation commands.")
             return
 
         if not ctx.message.reference:
-            await ctx.reply("You need to reply to a message to use this command.")
+            await ctx.reply("💬 Reply to a message first, then use `!en`.")
             return
 
         try:
@@ -132,7 +137,7 @@ class TranslationHandler:
             text_to_translate = original_message.content
 
             if not text_to_translate:
-                await ctx.reply("The replied-to message is empty.")
+                await ctx.reply("⚠️ The replied-to message is empty.")
                 return
 
             result = self._translation_service.translate_to_english(text_to_translate)
@@ -140,7 +145,12 @@ class TranslationHandler:
             if result and result.get("language").lower() not in ("english", "en"):
                 translated_text = result.get("text")
                 source_language = result.get("language")
-                await ctx.reply(f"Translated from {source_language}:\n> {translated_text}")
+                if not translated_text:
+                    await ctx.reply("❌ Translation completed but no text was returned.")
+                    return
+
+                quoted_text = self._as_quote_block(self._truncate_for_discord(translated_text, 1500))
+                await ctx.reply(f"🌐 **Translated from {source_language}**\n{quoted_text}")
 
                 # Track in database
                 try:
@@ -167,20 +177,20 @@ class TranslationHandler:
                 except Exception as db_error:
                     logger.error(f"Database tracking error: {db_error}", exc_info=True)
             elif result:
-                await ctx.reply("The message is already in English.")
+                await ctx.reply("✅ The message already appears to be in English.")
             else:
-                await ctx.reply("Sorry, I couldn't translate that.")
+                await ctx.reply("❌ I couldn't translate that message.")
         except Exception as e:
             logger.error(f"Error in !en command: {e}")
-            await ctx.reply("An error occurred while translating.")
+            await ctx.reply("❌ An error occurred while translating.")
 
     async def _handle_command_error(self, ctx, error):
         """Handle errors for translation commands."""
         if isinstance(error, commands.MissingRole):
-            await ctx.reply("You do not have the required 'Translator' role to use this command.")
+            await ctx.reply("⛔ You need the `Translator` role to use this command.")
         else:
             logger.error(f"Unhandled error in command: {error}")
-            await ctx.reply("An unexpected error occurred.")
+            await ctx.reply("❌ An unexpected error occurred.")
 
     async def _handle_auto_translation(self, message: discord.Message):
         """Automatically translate messages from users with Translator role."""
@@ -205,7 +215,8 @@ class TranslationHandler:
             if result and result.get("language") != "English":
                 translated_text = result.get("text")
                 source_language = result.get("language")
-                await message.reply(f"> {translated_text}")
+                if translated_text:
+                    await message.reply(self._as_quote_block(self._truncate_for_discord(translated_text, 1500)))
 
                 # Track in database
                 try:
@@ -234,3 +245,16 @@ class TranslationHandler:
         except Exception as e:
             logger.error(f"Auto-translation error: {e}", exc_info=True)
             # Don't send error messages for auto-translation to avoid spam
+
+    @staticmethod
+    def _truncate_for_discord(text: str, limit: int = 1500) -> str:
+        """Truncate long text to avoid Discord message limits."""
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
+
+    @staticmethod
+    def _as_quote_block(text: str) -> str:
+        """Convert arbitrary text to Discord quote block formatting."""
+        lines = text.splitlines() or [text]
+        return "\n".join(f"> {line}" if line else ">" for line in lines)

@@ -46,7 +46,7 @@ class PlayerListPaginationView(discord.ui.View):
 
     def build_embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title="📋 Registered Players for Gift Code Redemption",
+            title="📋 Player Profiles",
             description=(
                 f"**Total:** {self.total_players} | **Enabled:** {self.enabled_count} | "
                 f"**Disabled:** {self.disabled_count}\n"
@@ -94,6 +94,8 @@ class GiftCodeHandler:
     STATUS_ALREADY_REDEEMED = "already_redeemed"
     STATUS_API_REJECTED = "api_rejected"
     STATUS_INVALID_ID = "invalid_id"
+    REDEEM_MAX_RETRIES = 2
+    REDEEM_RETRY_DELAY_SECONDS = 1.0
 
     def __init__(
         self,
@@ -138,9 +140,14 @@ class GiftCodeHandler:
             """Remove a player from gift code redemption list."""
             await self._handle_remove_player_slash(interaction, player_id)
 
-        @self._bot.tree.command(name="listplayers", description="List all registered players for gift code redemption")
+        @self._bot.tree.command(name="listplayers", description="List all known players and redemption status")
         async def list_players(interaction: discord.Interaction):
-            """List all registered players for gift code redemption."""
+            """List all known players and redemption status."""
+            await self._handle_list_players_slash(interaction)
+
+        @self._bot.tree.command(name="playerlist", description="Alias for /listplayers")
+        async def player_list_alias(interaction: discord.Interaction):
+            """Alias command for listing all players."""
             await self._handle_list_players_slash(interaction)
 
         @self._bot.tree.command(name="giftcodes", description="List available gift codes")
@@ -263,8 +270,11 @@ class GiftCodeHandler:
                                     # Add jitter to avoid rating limits
                                     await asyncio.sleep(1.0)
 
-                                    result = await self._gift_code_service.redeem_gift_code(
-                                        session, player_id_int, new_code
+                                    result = await self._redeem_with_retries(
+                                        session=session,
+                                        player_id_int=player_id_int,
+                                        gift_code=new_code,
+                                        player_id_for_logs=player.player_id,
                                     )
 
                                     # Track detailed status category
@@ -281,6 +291,13 @@ class GiftCodeHandler:
                                     # We need a system bot user ID since there is no interaction context
                                     # We use the bot's user ID
                                     bot_user_id = self._bot.user.id if self._bot.user else 0
+
+                                    await self._sync_player_metadata_from_redemption_result(
+                                        session=session,
+                                        player_id=player.player_id,
+                                        redemption_result=result,
+                                        added_by_user_id=bot_user_id,
+                                    )
 
                                     await DatabaseService.log_gift_code_redemption(
                                         session,
@@ -354,13 +371,25 @@ class GiftCodeHandler:
             response = await self._gift_code_service.get_available_gift_codes()
 
             if not response.get("success"):
-                await interaction.followup.send(f"❌ Failed to fetch gift codes: {response.get('message')}")
+                embed = self._build_status_embed(
+                    title="❌ Could Not Fetch Gift Codes",
+                    description="The gift code list could not be retrieved.",
+                    color=discord.Color.red(),
+                )
+                embed.add_field(name="Details", value=str(response.get("message", "Unknown error")), inline=False)
+                await interaction.followup.send(embed=embed)
                 return
 
             codes = response.get("data", [])
 
             if not codes:
-                await interaction.followup.send("📋 No active gift codes found.")
+                await interaction.followup.send(
+                    embed=self._build_status_embed(
+                        title="📋 No Active Gift Codes",
+                        description="No currently active gift codes were found.",
+                        color=discord.Color.blue(),
+                    )
+                )
                 return
 
             embed = discord.Embed(
@@ -391,7 +420,13 @@ class GiftCodeHandler:
 
         except Exception as e:
             logger.error(f"Error listing gift codes: {e}", exc_info=True)
-            await interaction.followup.send("❌ An unexpected error occurred while fetching gift codes.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Unexpected Error",
+                    description="An unexpected error occurred while fetching gift codes.",
+                    color=discord.Color.red(),
+                )
+            )
 
     async def _handle_redeem_gift_code_slash(self, interaction: discord.Interaction, gift_code: str):
         """
@@ -424,43 +459,37 @@ class GiftCodeHandler:
 
                 if not registered_players:
                     await interaction.followup.send(
-                        "❌ No registered players found. Use `/addplayer {player_id}` to add players first."
+                        embed=self._build_status_embed(
+                            title="📭 No Enabled Players",
+                            description="Use `/addplayer <player_id>` to enable at least one player before redeeming.",
+                            color=discord.Color.orange(),
+                        )
                     )
                     return
-
-                # Get all players who have already redeemed this code (single DB query)
-                already_redeemed = await self._gift_code_service.get_redeemed_players(session, gift_code)
-                logger.info(f"Found {len(already_redeemed)} players who already redeemed code '{gift_code}'")
 
                 # Redeem for each player
                 results = []
                 for player in registered_players:
                     try:
-                        # Check if already redeemed (in-memory check, not DB query)
-                        if player.player_id in already_redeemed:
-                            logger.info(
-                                f"Skipping gift code '{gift_code}' for player {player.player_id} - already redeemed"
-                            )
-                            results.append(
-                                {
-                                    "player_id": player.player_id,
-                                    "player_name": player.player_name,
-                                    "success": False,
-                                    "message": "Already redeemed",
-                                    "error_code": "ALREADY_REDEEMED",
-                                    "already_redeemed": True,
-                                    "status_category": self.STATUS_ALREADY_REDEEMED,
-                                }
-                            )
-                            continue
-
                         player_id_int = int(player.player_id)
 
                         # Add jitter/delay to prevent 429 Too Many Requests from bulk redemption
                         if len(results) > 0:
                             await asyncio.sleep(1.0)
 
-                        result = await self._gift_code_service.redeem_gift_code(session, player_id_int, gift_code)
+                        result = await self._redeem_with_retries(
+                            session=session,
+                            player_id_int=player_id_int,
+                            gift_code=gift_code,
+                            player_id_for_logs=player.player_id,
+                        )
+
+                        await self._sync_player_metadata_from_redemption_result(
+                            session=session,
+                            player_id=player.player_id,
+                            redemption_result=result,
+                            added_by_user_id=interaction.user.id,
+                        )
 
                         # Log to database
                         await DatabaseService.log_gift_code_redemption(
@@ -478,7 +507,7 @@ class GiftCodeHandler:
                         results.append(
                             {
                                 "player_id": player.player_id,
-                                "player_name": player.player_name,
+                                "player_name": (result.get("player_profile") or {}).get("name") or player.player_name,
                                 "success": result.get("success", False),
                                 "message": result.get("message", "Unknown error"),
                                 "error_code": result.get("error_code"),
@@ -517,7 +546,11 @@ class GiftCodeHandler:
         except Exception as e:
             logger.error(f"Error in bulk redemption: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ An unexpected error occurred while processing the redemption. Please try again later."
+                embed=self._build_status_embed(
+                    title="❌ Redemption Failed",
+                    description="An unexpected error occurred while processing redemption. Please try again later.",
+                    color=discord.Color.red(),
+                )
             )
 
     async def _send_redemption_results_slash(
@@ -587,7 +620,12 @@ class GiftCodeHandler:
                 inline=False,
             )
 
-        embed.set_footer(text="🎮 Check in-game mail for successfully redeemed codes!")
+        embed.set_footer(
+            text=(
+                f"🎮 Check in-game mail for successful claims • "
+                f"Retry policy: up to {self.REDEEM_MAX_RETRIES} retries for API-rejected failures"
+            )
+        )
 
         await interaction.followup.send(embed=embed)
         logger.info(
@@ -615,13 +653,72 @@ class GiftCodeHandler:
 
         return self.STATUS_API_REJECTED
 
+    async def _redeem_with_retries(
+        self,
+        session,
+        player_id_int: int,
+        gift_code: str,
+        player_id_for_logs: str,
+    ) -> Dict:
+        """Redeem a code with retry for transient/API failures only."""
+        max_attempts = self.REDEEM_MAX_RETRIES + 1
+        last_result: Dict = {
+            "success": False,
+            "message": "Unexpected error occurred",
+            "error_code": "UNEXPECTED_ERROR",
+        }
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                last_result = await self._gift_code_service.redeem_gift_code(session, player_id_int, gift_code)
+            except Exception as exc:
+                logger.error(
+                    "Redeem attempt %s/%s crashed for player %s and code '%s': %s",
+                    attempt,
+                    max_attempts,
+                    player_id_for_logs,
+                    gift_code,
+                    exc,
+                    exc_info=True,
+                )
+                last_result = {
+                    "success": False,
+                    "message": "Unexpected error occurred",
+                    "error_code": "UNEXPECTED_ERROR",
+                }
+
+            status_category = self._categorize_redemption_status(last_result)
+            if status_category != self.STATUS_API_REJECTED or attempt >= max_attempts:
+                normalized_result = dict(last_result)
+                normalized_result.setdefault("attempts", attempt)
+                normalized_result.setdefault("retries", max(0, attempt - 1))
+                return normalized_result
+
+            retry_delay = self.REDEEM_RETRY_DELAY_SECONDS * attempt
+            logger.warning(
+                "Redeem attempt %s/%s failed for player %s and code '%s' with retryable status. "
+                "Retrying in %.1fs (error_code=%s, message=%s)",
+                attempt,
+                max_attempts,
+                player_id_for_logs,
+                gift_code,
+                retry_delay,
+                last_result.get("error_code"),
+                last_result.get("message"),
+            )
+            await asyncio.sleep(retry_delay)
+
+        return last_result
+
     def _format_result_lines(self, records: List[Dict], emoji: str, limit: int = 10) -> str:
         """Render result records for embed fields with deterministic truncation."""
         lines = []
         for record in records[:limit]:
             player_display = record.get("player_name") or record.get("player_id")
             message = record.get("message", "No details")
-            lines.append(f"{emoji} `{record['player_id']}` - {player_display}\n   └─ {message}")
+            retry_count = int(record.get("retries", 0) or 0)
+            retry_suffix = f" (retried {retry_count}x)" if retry_count > 0 else ""
+            lines.append(f"{emoji} `{record['player_id']}` - {player_display}{retry_suffix}\n   └─ {message}")
 
         if len(records) > limit:
             lines.append(f"*... and {len(records) - limit} more*")
@@ -669,6 +766,44 @@ class GiftCodeHandler:
             await DatabaseService.update_registered_player_metadata(
                 session=session,
                 player_id=resolved_player_id,
+                player_name=resolved_name,
+                kingdom=resolved_kingdom,
+                castle_level=resolved_castle_level,
+            )
+
+    async def _sync_player_metadata_from_redemption_result(
+        self,
+        session,
+        player_id: str,
+        redemption_result: Dict,
+        added_by_user_id: int,
+    ) -> None:
+        """Refresh player metadata from redeem response and upsert when needed."""
+        player_profile = redemption_result.get("player_profile")
+        if not isinstance(player_profile, dict):
+            return
+
+        resolved_player_id = str(player_profile.get("playerId") or player_id)
+        resolved_name = player_profile.get("name")
+        resolved_kingdom = str(player_profile.get("kingdom")) if player_profile.get("kingdom") is not None else None
+        resolved_castle_level = (
+            str(player_profile.get("level")) if player_profile.get("level") is not None else None
+        )
+
+        await DatabaseService.update_registered_player_metadata(
+            session=session,
+            player_id=resolved_player_id,
+            player_name=resolved_name,
+            kingdom=resolved_kingdom,
+            castle_level=resolved_castle_level,
+            added_by_user_id=added_by_user_id,
+        )
+
+        # If an old/non-canonical player ID exists in the table, keep it refreshed too.
+        if resolved_player_id != str(player_id):
+            await DatabaseService.update_registered_player_metadata(
+                session=session,
+                player_id=str(player_id),
                 player_name=resolved_name,
                 kingdom=resolved_kingdom,
                 castle_level=resolved_castle_level,
@@ -728,7 +863,7 @@ class GiftCodeHandler:
 
                 embed = discord.Embed(
                     title="✅ Player Added Successfully",
-                    description="Player has been added to the gift code redemption list.",
+                    description="Player profile saved and enabled for gift code redemption.",
                     color=discord.Color.green(),
                 )
                 embed.add_field(name="Player ID", value=f"`{resolved_player_id}`", inline=True)
@@ -745,7 +880,13 @@ class GiftCodeHandler:
 
         except Exception as e:
             logger.error(f"Error adding player {player_id}: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while adding the player.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Could Not Add Player",
+                    description="An error occurred while adding the player.",
+                    color=discord.Color.red(),
+                )
+            )
 
     async def _handle_remove_player_slash(self, interaction: discord.Interaction, player_id: str):
         """Handle removing a player from the redemption list."""
@@ -758,7 +899,13 @@ class GiftCodeHandler:
                 player = await DatabaseService.get_registered_player(session, player_id)
 
                 if not player:
-                    await interaction.followup.send(f"❌ Player `{player_id}` not found in the redemption list.")
+                    await interaction.followup.send(
+                        embed=self._build_status_embed(
+                            title="❌ Player Not Found",
+                            description=f"Player `{player_id}` is not in the player list.",
+                            color=discord.Color.red(),
+                        )
+                    )
                     return
 
                 # Determine admin status (guild context only)
@@ -769,7 +916,11 @@ class GiftCodeHandler:
                 # Check ownership or admin rights
                 if player.added_by_user_id != interaction.user.id and not is_admin:
                     await interaction.followup.send(
-                        "⛔ You can only remove players that you added, or you must be an admin."
+                        embed=self._build_status_embed(
+                            title="⛔ Permission Denied",
+                            description="You can only remove players you added, unless you are a server admin.",
+                            color=discord.Color.orange(),
+                        )
                     )
                     return
 
@@ -785,11 +936,23 @@ class GiftCodeHandler:
                     await interaction.followup.send(embed=embed)
                     logger.info(f"Player {player_id} removed by {interaction.user.id} (admin={is_admin})")
                 else:
-                    await interaction.followup.send(f"❌ Player `{player_id}` not found in the redemption list.")
+                    await interaction.followup.send(
+                        embed=self._build_status_embed(
+                            title="❌ Player Not Found",
+                            description=f"Player `{player_id}` is not in the player list.",
+                            color=discord.Color.red(),
+                        )
+                    )
 
         except Exception as e:
             logger.error(f"Error removing player {player_id}: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while removing the player.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Could Not Remove Player",
+                    description="An error occurred while removing the player.",
+                    color=discord.Color.red(),
+                )
+            )
 
     async def _handle_list_players_slash(self, interaction: discord.Interaction):
         """Handle listing all registered players."""
@@ -801,7 +964,13 @@ class GiftCodeHandler:
                 all_players = await DatabaseService.get_registered_players(session, enabled_only=False)
 
                 if not all_players:
-                    await interaction.followup.send("📋 No players registered for gift code redemption.")
+                    await interaction.followup.send(
+                        embed=self._build_status_embed(
+                            title="📋 No Players Found",
+                            description="No player profiles are available yet.",
+                            color=discord.Color.blue(),
+                        )
+                    )
                     return
 
                 enabled_players = [p for p in all_players if p.enabled]
@@ -822,7 +991,13 @@ class GiftCodeHandler:
 
         except Exception as e:
             logger.error(f"Error listing players: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while retrieving the player list.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Could Not List Players",
+                    description="An error occurred while retrieving the player list.",
+                    color=discord.Color.red(),
+                )
+            )
 
     async def _handle_toggle_player_slash(self, interaction: discord.Interaction, player_id: str):
         """Handle toggling a player's enabled status."""
@@ -845,8 +1020,25 @@ class GiftCodeHandler:
                     await interaction.followup.send(embed=embed)
                     logger.info(f"Player {player_id} toggled to {status_text} by {interaction.user.id}")
                 else:
-                    await interaction.followup.send(f"❌ Player `{player_id}` not found in the redemption list.")
+                    await interaction.followup.send(
+                        embed=self._build_status_embed(
+                            title="❌ Player Not Found",
+                            description=f"Player `{player_id}` is not in the player list.",
+                            color=discord.Color.red(),
+                        )
+                    )
 
         except Exception as e:
             logger.error(f"Error toggling player {player_id}: {e}", exc_info=True)
-            await interaction.followup.send("❌ An error occurred while updating the player status.")
+            await interaction.followup.send(
+                embed=self._build_status_embed(
+                    title="❌ Could Not Update Player",
+                    description="An error occurred while updating the player status.",
+                    color=discord.Color.red(),
+                )
+            )
+
+    @staticmethod
+    def _build_status_embed(title: str, description: str, color: discord.Color) -> discord.Embed:
+        """Build a consistent status embed for command responses."""
+        return discord.Embed(title=title, description=description, color=color)
